@@ -14,8 +14,14 @@ struct LouieApp: App {
                 .environment(config)
                 .frame(minWidth: 960, minHeight: 600)
         }
+        // NOTE: the Settings scene needs its own environment injection — it is a
+        // separate scene from the WindowGroup, and @Environment(...) asserts
+        // (crashes) if the object was never provided.
         Settings {
             SettingsView()
+                .environment(engine)
+                .environment(store)
+                .environment(config)
         }
         .commands {
             CommandGroup(after: .appInfo) {
