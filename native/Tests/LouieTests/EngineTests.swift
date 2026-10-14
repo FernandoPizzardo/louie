@@ -234,6 +234,50 @@ final class EngineTests: XCTestCase {
         XCTAssertFalse(engine.nodePath.isEmpty, "Node path must be resolved without PATH")
     }
 
+    /// Persistence is opt-in, /api/net defaults to LAN off, and the CA listener
+    /// serves only the public certificate.
+    @MainActor
+    func testControlAPIDeviceFeatures() async throws {
+        let engine = EngineController()
+        guard FileManager.default.fileExists(atPath: engine.enginePath) else { throw XCTSkip("engine not found") }
+        engine.configFile = NSTemporaryDirectory() + "louie-dev-\(UUID().uuidString).json"
+        engine.proxyPort = 18992
+        engine.start()
+        defer { engine.stop() }
+        let deadline = Date().addingTimeInterval(8)
+        while Date() < deadline, engine.info == nil {
+            if case .failed = engine.status { break }
+            try await Task.sleep(for: .milliseconds(200))
+        }
+        _ = try XCTUnwrap(engine.info)
+        let control = try XCTUnwrap(engine.control)
+
+        // Persistence is opt-in.
+        let p0 = try await control.getJSON("/api/persist", as: PersistInfo.self)
+        XCTAssertFalse(p0.enabled ?? true, "persistence must default to off")
+        _ = try await control.postJSON("/api/persist", json: [:], as: OkResponse.self) // no-op keeps shape
+        let p1 = try await control.postCodable("/api/persist", PersistPatch(enabled: true), as: OkResponse.self)
+        XCTAssertTrue(p1.ok)
+        let p2 = try await control.getJSON("/api/persist", as: PersistInfo.self)
+        XCTAssertEqual(p2.enabled, true)
+
+        // LAN off by default.
+        let net = try await control.getJSON("/api/net", as: NetInfo.self)
+        XCTAssertFalse(net.lanEnabled)
+
+        // CA listener serves the cert, never the key.
+        let serve = try await control.postCodable("/api/ca/serve", OnPatch(on: true), as: CAServeResult.self)
+        XCTAssertTrue(serve.serving ?? false)
+        if let cer = serve.cerUrl, let url = URL(string: cer) {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            XCTAssertGreaterThan(data.count, 100)
+            XCTAssertEqual(data.first, 0x30, "DER should start with 0x30")
+        } else {
+            XCTFail("no cerUrl: \(serve)")
+        }
+        _ = try await control.postCodable("/api/ca/serve", OnPatch(on: false), as: CAServeResult.self)
+    }
+
     private func runCurl(proxy: Int) throws -> (ok: Bool, body: String) {
         let curl = Process()
         curl.executableURL = URL(fileURLWithPath: "/usr/bin/curl")

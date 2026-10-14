@@ -71,6 +71,13 @@ final class SessionStore {
         try? await control.post("/api/recording", json: ["on": on])
     }
 
+    /// Save one call as a read-only copy for the MCP server.
+    /// Pass `full: nil` first; if the body is large the engine asks to confirm.
+    func saveForMCP(id: Int, full: Bool?) async -> SaveResult? {
+        guard let control else { return nil }
+        return try? await control.postCodable("/api/transaction/\(id)/save", SaveRequest(full: full), as: SaveResult.self)
+    }
+
     // MARK: SSE
 
     private func startEvents() {

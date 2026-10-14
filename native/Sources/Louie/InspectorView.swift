@@ -6,6 +6,8 @@ struct InspectorView: View {
     @Environment(SessionStore.self) private var store
     @State private var tab = 0
     @State private var htmlPreview = false
+    @State private var saveMessage: String?
+    @State private var confirmSave: SaveResult?
 
     private let mono = Font.system(.body, design: .monospaced)
 
@@ -31,7 +33,34 @@ struct InspectorView: View {
         }
         .onChange(of: store.selectedID) { _, id in
             htmlPreview = false
+            saveMessage = nil
             Task { await store.select(id) }
+        }
+        .alert("Save full body for MCP?",
+               isPresented: Binding(get: { confirmSave != nil }, set: { if !$0 { confirmSave = nil } })) {
+            Button("Save full body") { Task { await save(full: true) } }
+            Button("Truncated copy") { Task { await save(full: false) } }
+            Button("Cancel", role: .cancel) { confirmSave = nil }
+        } message: {
+            let kb = Double(confirmSave?.size ?? 0) / 1024
+            let cap = Double(confirmSave?.cap ?? 0) / 1024
+            Text(String(format: "This call is %.0f KB, over the %.0f KB cap. Save the full body for the MCP server, or a truncated copy?", kb, cap))
+        }
+    }
+
+    private func save(full: Bool?) async {
+        guard let id = store.selectedID else { return }
+        let r = await store.saveForMCP(id: id, full: full)
+        guard let r else { saveMessage = "save failed"; return }
+        if r.needsConfirm == true {
+            confirmSave = r
+            return
+        }
+        confirmSave = nil
+        if r.ok {
+            saveMessage = "Saved \(r.name ?? "copy")\(r.truncated == true ? " (truncated)" : "")"
+        } else {
+            saveMessage = r.error ?? "save failed"
         }
     }
 
@@ -42,6 +71,11 @@ struct InspectorView: View {
             Text(badge(d)).font(.system(.caption, design: .monospaced))
             Text(d.summaryLine).font(.system(.caption, design: .monospaced)).lineLimit(1)
             Spacer()
+            if let m = saveMessage {
+                Text(m).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Button("Save for MCP") { Task { await save(full: nil) } }
+                .controlSize(.small)
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
     }

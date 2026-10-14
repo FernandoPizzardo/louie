@@ -140,6 +140,53 @@ struct ImportResult: Decodable {
     let summary: ImportSummary?
     let error: String?
 }
+
+/// Body for `POST /api/transaction/:id/save`.
+struct SaveRequest: Encodable { let full: Bool? }
+
+/// Response from the save endpoint: either saved, or a request to confirm when
+/// the body exceeds the configured cap.
+struct SaveResult: Decodable {
+    let ok: Bool
+    let needsConfirm: Bool?
+    let size: Int?
+    let cap: Int?
+    let name: String?
+    let path: String?
+    let truncated: Bool?
+    let error: String?
+}
+
+/// `GET/POST /api/persist`.
+struct PersistInfo: Decodable, Equatable {
+    var enabled: Bool? = nil
+    var dir: String? = nil
+    var maxBodyBytes: Int? = nil
+    var retentionDays: Int? = nil
+}
+struct PersistPatch: Codable { let enabled: Bool }
+struct OnPatch: Codable { let on: Bool }
+struct OkResponse: Decodable { let ok: Bool }
+
+/// `GET /api/net` — LAN + CA-serving state for device setup.
+struct NetInfo: Decodable, Equatable {
+    var lanEnabled: Bool = false
+    var ip: String = "127.0.0.1"
+    var proxyPort: Int = 8888
+    var caServePort: Int = 8890
+    var serving: Bool = false
+    var cerUrl: String = ""
+    var mobileconfigUrl: String = ""
+    var proxyHost: String = ""
+}
+
+/// `POST /api/ca/serve`.
+struct CAServeResult: Decodable {
+    let ok: Bool
+    let serving: Bool?
+    let cerUrl: String?
+    let mobileconfigUrl: String?
+}
 struct EngineStatus: Decodable {
     let proxyPort: Int?
     let webPort: Int?

@@ -19,6 +19,7 @@ const { Store } = require('../lib/store');
 const { ToolPipeline } = require('../lib/tools');
 const { ProxyEngine } = require('../lib/proxy');
 const { WebServer } = require('../lib/web');
+const { SessionLog } = require('../lib/session-log');
 
 function parseArgs(argv) {
   const out = { sslHosts: [] };
@@ -101,8 +102,24 @@ function main() {
   const store = new Store();
   const tools = new ToolPipeline(config);
 
+  // Durable, redacted session history for the MCP server (opt-in).
+  const persistDir = (config.persist && config.persist.dir)
+    || path.join(path.dirname(config._file), 'sessions-data');
+  const sessionLog = new SessionLog({
+    dir: persistDir,
+    enabled: !!(config.persist && config.persist.enabled),
+    maxBodyBytes: (config.persist && config.persist.maxBodyBytes) || undefined,
+    retentionDays: (config.persist && config.persist.retentionDays) || undefined,
+    redact: config.redact,
+  });
+  store.on('tx:update', (s) => { const tx = store.get(s.id); if (tx) sessionLog.append(tx); });
+  if (sessionLog.enabled) {
+    sessionLog.prune();
+    setInterval(() => sessionLog.prune(), 24 * 60 * 60 * 1000).unref();
+  }
+
   const proxy = new ProxyEngine({ ca, store, tools });
-  const web = new WebServer({ store, tools, ca, config, token: args.token });
+  const web = new WebServer({ store, tools, ca, config, token: args.token, sessionLog, proxy });
 
   // Headless mode: pick an ephemeral control port and machine-readable output.
   if (args.headless) {

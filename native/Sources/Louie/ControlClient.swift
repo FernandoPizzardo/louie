@@ -40,4 +40,10 @@ struct ControlClient {
         let (respData, _) = try await URLSession.shared.data(for: request(path, method: "POST", body: data))
         return try JSONDecoder().decode(T.self, from: respData)
     }
+
+    func postCodable<B: Encodable, R: Decodable>(_ path: String, _ body: B, as: R.Type) async throws -> R {
+        let data = try JSONEncoder().encode(body)
+        let (respData, _) = try await URLSession.shared.data(for: request(path, method: "POST", body: data))
+        return try JSONDecoder().decode(R.self, from: respData)
+    }
 }

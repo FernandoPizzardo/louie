@@ -79,4 +79,18 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(r.summary?.mapRemote, 4)
         XCTAssertEqual(r.summary?.enabled, ["mapRemote", "throttle"])
     }
+
+    func testNetInfoAndSaveResultDecode() throws {
+        let net = try JSONDecoder().decode(NetInfo.self, from: Data("""
+        {"lanEnabled":true,"ip":"192.168.1.5","proxyPort":8888,"caServePort":8890,
+         "serving":true,"cerUrl":"http://192.168.1.5:8890/ca.cer",
+         "mobileconfigUrl":"http://192.168.1.5:8890/ca.mobileconfig","proxyHost":"192.168.1.5:8888"}
+        """.utf8))
+        XCTAssertTrue(net.lanEnabled)
+        XCTAssertEqual(net.proxyHost, "192.168.1.5:8888")
+
+        let save = try JSONDecoder().decode(SaveResult.self, from: Data(#"{"ok":false,"needsConfirm":true,"size":999999,"cap":524288}"#.utf8))
+        XCTAssertTrue(save.needsConfirm == true)
+        XCTAssertEqual(save.cap, 524288)
+    }
 }

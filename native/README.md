@@ -58,6 +58,44 @@ Control endpoints (require `x-charles-token` when a token is set):
 In headless mode the engine prints a ready line and picks an ephemeral control
 port; there is no static UI. The server is API-only (the native app is the UI).
 
+## MCP server (read-only history)
+
+`bin/louie-mcp.js` exposes captured calls to an MCP client over stdio. It reads
+the JSON session files directly, so it works whether or not the engine is running.
+
+Turn on **Settings (⌘,) › Session history › Store calls on disk** first (it is
+opt-in). Records are redacted before they are written (`Authorization`, `Cookie`,
+`Set-Cookie`, plus common token/password JSON fields).
+
+Tools: `list_transactions`, `get_transaction`, `search_bodies`,
+`diff_transactions`, `list_saved`, `get_saved`, `summarize_session`.
+
+Register it (copy the snippet from **Settings › Copy MCP config**):
+```json
+{ "mcp": { "louie": { "type": "local", "command": ["node", "<repo>/bin/louie-mcp.js"], "enabled": true } } }
+```
+
+Data dir: `--dir <path>`, or `$LOUIE_DATA_DIR`, else the app's
+`~/Library/Application Support/Louie/sessions-data`.
+
+In the inspector, **Save for MCP** pins one call as a read-only full-body copy
+(`saved/`). If the body is over the 512 KB cap, Louie asks whether to save the
+full body or a truncated copy. Pinned copies are exempt from the 7-day retention.
+
+## Device debugging (your own builds)
+
+**Tools › Device setup…** turns on LAN exposure and starts a listener that serves
+only the public root certificate. It shows a proxy address and QR codes.
+
+- iPhone: scan the `.mobileconfig` QR, install the profile, then enable full trust
+  for "Louie Root CA" under Certificate Trust Settings.
+- Android: scan the `.cer` QR and install the CA, or download it to the device.
+  For your own debug builds, trust user CAs via a debug-only network security
+  config.
+
+LAN binding is **off by default** and the CA listener runs only while the sheet is
+open. `ca.key` is never served.
+
 ## Status
 - **Phase 1 (done):** app shell, engine lifecycle, headless control API + token,
   packaging script.
@@ -84,3 +122,8 @@ port; there is no static UI. The server is API-only (the native app is the UI).
   **Dracula** color scheme on a dark code surface (keeps contrast on dark backgrounds).
 - **Phase 6 (done):** retired the static web GUI. `public/` is deleted and the
   server is API-only; the native Louie app is the single UI.
+- **Phase 7 (done):** durable, redacted session history (opt-in, 7-day retention,
+  512 KB body cap) and a read-only MCP server (`bin/louie-mcp.js`); "Save for MCP"
+  in the inspector with a large-body confirm prompt.
+- **Phase 8 (done):** device debugging — LAN binding (off by default), a
+  cert-only CA listener, QR codes, and iPhone/Android setup steps.

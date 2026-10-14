@@ -11,12 +11,39 @@ final class ConfigStore {
     private(set) var ca: CAInfo?
     private(set) var trustMessage: String?
     private(set) var importMessage: String?
+    private(set) var persist = PersistInfo()
+    private(set) var net = NetInfo()
 
     private var control: ControlClient?
 
     func attach(_ control: ControlClient) {
         self.control = control
-        Task { await load(); await refreshCA() }
+        Task { await load(); await refreshCA(); await loadPersist(); await refreshNet() }
+    }
+
+    func refreshNet() async {
+        net = (try? await control?.getJSON("/api/net", as: NetInfo.self)) ?? NetInfo()
+    }
+
+    /// Turn LAN exposure on or off (re-binds the proxy). Off by default.
+    func setLAN(_ on: Bool) async {
+        _ = try? await control?.postCodable("/api/lan", OnPatch(on: on), as: OkResponse.self)
+        await refreshNet()
+    }
+
+    /// Start/stop the CA-serving listener (only the public cert is served).
+    func serveCA(_ on: Bool) async {
+        _ = try? await control?.postCodable("/api/ca/serve", OnPatch(on: on), as: CAServeResult.self)
+        await refreshNet()
+    }
+
+    func loadPersist() async {
+        persist = (try? await control?.getJSON("/api/persist", as: PersistInfo.self)) ?? PersistInfo()
+    }
+
+    func setPersist(_ on: Bool) async {
+        _ = try? await control?.postCodable("/api/persist", PersistPatch(enabled: on), as: OkResponse.self)
+        await loadPersist()
     }
 
     func detach() { control = nil; loaded = false; draft = ToolConfig(); ca = nil; trustMessage = nil }

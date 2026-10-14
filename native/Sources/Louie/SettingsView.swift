@@ -5,6 +5,7 @@ import SwiftUI
 /// installs (nvm, asdf, Homebrew on a custom prefix, ...).
 struct SettingsView: View {
     @Environment(EngineController.self) private var engine
+    @Environment(ConfigStore.self) private var config
     @AppStorage("nodePath") private var nodePath = ""
     @AppStorage("enginePath") private var enginePath = ""
 
@@ -40,6 +41,26 @@ struct SettingsView: View {
                         .frame(width: 90)
                 }
             }
+            Section("Session history (MCP)") {
+                Toggle("Store calls on disk", isOn: Binding(
+                    get: { config.persist.enabled ?? false },
+                    set: { on in Task { await config.setPersist(on) } }))
+                if let dir = config.persist.dir {
+                    LabeledContent("Folder") {
+                        Text(dir).font(.caption).foregroundStyle(.secondary)
+                            .textSelection(.enabled).lineLimit(1)
+                    }
+                }
+                LabeledContent("Retention") {
+                    Text("\(config.persist.retentionDays ?? 7) days · bodies over \(((config.persist.maxBodyBytes ?? 0) / 1024)) KB are truncated")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                HStack {
+                    Button("Copy MCP config") { copyMCPConfig() }
+                    Text("Read-only history for the louie-mcp server.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
         }
         .formStyle(.grouped)
         .frame(width: 460)
@@ -55,5 +76,25 @@ struct SettingsView: View {
     private func reveal(_ path: String) {
         guard !path.isEmpty else { return }
         NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+    }
+
+    /// Registration snippet for an MCP client, pointing at louie-mcp.js next to
+    /// the engine.
+    private func copyMCPConfig() {
+        let engineDir = (engine.enginePath as NSString).deletingLastPathComponent
+        let mcp = (engineDir as NSString).appendingPathComponent("louie-mcp.js")
+        let snippet = """
+        {
+          "mcp": {
+            "louie": {
+              "type": "local",
+              "command": ["node", "\(mcp)"],
+              "enabled": true
+            }
+          }
+        }
+        """
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(snippet, forType: .string)
     }
 }

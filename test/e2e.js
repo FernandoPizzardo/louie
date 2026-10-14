@@ -24,6 +24,7 @@ const { Store } = require('../lib/store');
 const { ToolPipeline, locMatches } = require('../lib/tools');
 const { ProxyEngine } = require('../lib/proxy');
 const { WebServer } = require('../lib/web');
+const { SessionLog } = require('../lib/session-log');
 const { load } = require('../lib/config');
 
 let passed = 0, failed = 0;
@@ -92,9 +93,29 @@ function curlProxy(proxyPort, target, { cacert, extra = [] } = {}) {
   });
 }
 
+// control-API helpers (no token in tests)
+function webGet(port, path, binary = false) {
+  return new Promise((resolve, reject) => {
+    http.get({ host: '127.0.0.1', port, path }, (res) => {
+      const c = []; res.on('data', (d) => c.push(d));
+      res.on('end', () => resolve(binary ? Buffer.concat(c) : Buffer.concat(c).toString()));
+    }).on('error', reject);
+  });
+}
+function webPost(port, path, body) {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify(body || {});
+    const req = http.request({ host: '127.0.0.1', port, path, method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) } }, (res) => {
+      const c = []; res.on('data', (d) => c.push(d));
+      res.on('end', () => resolve(JSON.parse(Buffer.concat(c).toString())));
+    });
+    req.on('error', reject); req.end(data);
+  });
+}
+
 async function main() {
   console.log('\ncharles-clone — end-to-end test\n');
-
   const caDir = fs.mkdtempSync(path.join(os.tmpdir(), 'clone-ca-'));
   const configFile = path.join(caDir, 'config.json');
 
@@ -113,8 +134,9 @@ async function main() {
   // while still exercising a real CONNECT -> forged-leaf MITM.
   config.sslLocations = [{ host: 'localhost', port: httpsOrigin.port }];
   const tools = new ToolPipeline(config);
+  const sessionLog = new SessionLog({ dir: path.join(caDir, 'session-data'), enabled: false, redact: config.redact });
   const proxy = new ProxyEngine({ ca, store, tools });
-  const web = new WebServer({ store, tools, ca, config });
+  const web = new WebServer({ store, tools, ca, config, sessionLog });
 
   await new Promise((r) => proxy.listen(0, '127.0.0.1', r));
   await new Promise((r) => web.listen(0, '127.0.0.1', r));
@@ -446,6 +468,56 @@ async function main() {
     });
     assert.ok((cfg.sslLocations || []).some((l) => l.host === 'imported.example.com'),
       'engine config should include the imported SSL host');
+  });
+
+  // 10d. Durable session history (opt-in) + save-for-MCP.
+  await test('persist is opt-in and save-for-MCP writes a read-only copy', async () => {
+    await curlProxy(proxyPort, `http://127.0.0.1:${origin.port}/save-me`);
+    const list = JSON.parse(await webGet(webPort, '/api/transactions'));
+    const id = list[list.length - 1].id;
+
+    assert.strictEqual(JSON.parse(await webGet(webPort, '/api/persist')).enabled, false,
+      'persistence must be opt-in (off by default)');
+    await webPost(webPort, '/api/persist', { enabled: true });
+    assert.strictEqual(JSON.parse(await webGet(webPort, '/api/persist')).enabled, true);
+
+    const r = await webPost(webPort, `/api/transaction/${id}/save`, {});
+    assert.ok(r.ok, 'save failed: ' + JSON.stringify(r));
+    assert.ok(r.name, 'save should return a name');
+    const saved = JSON.parse(await webGet(webPort, '/api/saved'));
+    assert.ok(saved.some((s) => s.name === r.name), 'saved copy should be listed');
+
+    await webPost(webPort, '/api/persist', { enabled: false });
+  });
+
+  // 10e. CA serving for devices — only the public certificate.
+  await test('CA listener serves only the public cert', async () => {
+    config.caServePort = 0; // ephemeral
+    const started = await webPost(webPort, '/api/ca/serve', { on: true });
+    assert.ok(started.serving, JSON.stringify(started));
+    const m = /:(\d+)\/ca\.cer$/.exec(started.cerUrl);
+    assert.ok(m, 'cerUrl should include a port: ' + started.cerUrl);
+    const port = Number(m[1]);
+
+    const cer = await webGet(port, '/ca.cer', true);
+    assert.ok(Buffer.isBuffer(cer) && cer.length > 100, 'DER should be non-trivial');
+    assert.strictEqual(cer[0], 0x30, 'DER must start with a SEQUENCE (0x30)');
+
+    const mc = await webGet(port, '/ca.mobileconfig');
+    assert.match(mc, /com\.apple\.security\.root/, 'profile should embed the root cert');
+
+    const key = await webGet(port, '/ca.key');
+    assert.match(key, /not found/, 'ca.key must never be served');
+
+    await webPost(webPort, '/api/ca/serve', { on: false });
+  });
+
+  // 10f. /api/net reports LAN state.
+  await test('/api/net reports LAN off by default', async () => {
+    const net = JSON.parse(await webGet(webPort, '/api/net'));
+    assert.strictEqual(net.lanEnabled, false);
+    assert.ok(typeof net.proxyHost === 'string' && net.proxyHost.includes(':'));
+    assert.match(net.cerUrl, /^http:\/\/[^/]+\/ca\.cer$/);
   });
 
   // (The former web-GUI tests — app.css [hidden] and the Tools editor wiring —

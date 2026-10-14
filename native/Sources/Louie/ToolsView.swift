@@ -6,6 +6,7 @@ import AppKit
 struct ToolsView: View {
     @Environment(ConfigStore.self) private var config
     @Environment(\.dismiss) private var dismiss
+    @State private var showDevice = false
 
     var body: some View {
         @Bindable var config = config
@@ -42,7 +43,8 @@ struct ToolsView: View {
             }
         }
         .frame(minWidth: 720, minHeight: 560)
-        .task { if !config.loaded { await config.load() } }
+        .task { if !config.loaded { await config.load() }; await config.refreshNet() }
+        .sheet(isPresented: $showDevice) { DeviceSetupView().environment(config) }
     }
 
     // MARK: Block List
@@ -234,6 +236,7 @@ struct ToolsView: View {
                     }
                     Spacer()
                     Button("Refresh") { Task { await config.refreshCA() } }
+                    Button("Device setup…") { showDevice = true }
                     Button("Trust in Keychain…") { Task { await config.trustCA() } }
                         .disabled(config.ca == nil)
                 }
