@@ -1,0 +1,10 @@
+.DS_Store
+
+node_modules/
+.npm/
+*.log
+
+# native (SwiftPM) build artifacts
+native/.build/
+native/dist/
+native/.swiftpm/

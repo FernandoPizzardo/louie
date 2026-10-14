@@ -1,0 +1,19 @@
+{
+  "name": "charles-clone",
+  "version": "1.0.0",
+  "description": "A small HTTP/HTTPS intercepting proxy debugger in the spirit of Charles Proxy — MITM SSL proxying, live session table, and the classic tools (block list, map remote/local, rewrite, throttle).",
+  "bin": {
+    "charles-clone": "bin/charles-clone.js"
+  },
+  "main": "bin/charles-clone.js",
+  "scripts": {
+    "start": "node bin/charles-clone.js",
+    "test": "node test/e2e.js && node test/import.test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": ["proxy", "http", "https", "mitm", "debug", "charles", "inspector"],
+  "license": "MIT",
+  "dependencies": {}
+}
