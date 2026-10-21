@@ -17,7 +17,7 @@ reimplementation in the spirit of Charles Proxy. It has two parts:
 
 ```
 bin/charles-clone.js   engine entry point (CLI + headless for the app)
-bin/louie-mcp.js       read-only MCP server over session history
+bin/louie-mcp.js       MCP server over session history (read-only + delete_transactions)
 lib/proxy.js           HTTP forward proxy, CONNECT, MITM, HTTP/2
 lib/tools.js           tool pipeline (Block List, Map, Rewrite, Throttle, ...)
 lib/ca.js              root CA + per-host leaf certs (openssl)
@@ -26,8 +26,11 @@ lib/web.js             control API (token-auth) + CA-serving listener
 lib/session-log.js     durable, redacted session history for the MCP server
 lib/import-charles.js  import settings from the real Charles app XML
 docs/charles-behavior.md  BEHAVIOR SPEC derived from charles.jar (read this)
+docs/control-api.md    HTTP contract for engine clients (app / web / Electron)
+web/                   React + TypeScript + shadcn/ui client of the control API (Vite)
+electron/              Desktop shell (Electron): starts the engine, serves web/dist, Linux packages
 native/                SwiftUI app (SwiftPM); see native/README.md
-test/                  Node tests (e2e, import, session-log, mcp)
+test/                  Node tests (e2e, import, session-log, mcp, control-api)
 ```
 
 ## Commands
@@ -40,6 +43,10 @@ npm test
 cd native && swift build
 cd native && swift test
 native/scripts/make-app.sh          # -> native/dist/Louie.app (ad-hoc signed)
+
+# Web UI (dev server proxies /api and /events to the engine)
+cd web && npm install && LOUIE_ENGINE=http://127.0.0.1:8889 npm run dev
+cd web && npm run build && npm run lint
 
 # Run the engine by hand
 node bin/charles-clone.js --proxy 8888
@@ -64,6 +71,13 @@ node bin/charles-clone.js --import-charles          # import from the Charles ap
 6. **Tests are the contract.** `npm test` and `swift test` must pass. Add tests
    with every behavior change; don't weaken existing assertions to make a change
    pass.
+8. **Web dependencies stay in `web/`.** `lib/` and the root `package.json` must
+   not gain runtime dependencies. The web client talks only to the control API
+   and never imports engine code.
+7. **The control API is an interface.** `lib/web.js` is consumed by the SwiftUI
+   app and by future web/Electron clients. When a route or SSE event changes,
+   update `docs/control-api.md` and `test/control-api.test.js` in the same
+   change.
 
 ## Gotchas (learned the hard way)
 
@@ -97,8 +111,12 @@ node bin/charles-clone.js --import-charles          # import from the Charles ap
 
 ## MCP server
 
-`bin/louie-mcp.js` is a read-only stdio MCP server over the session history.
+`bin/louie-mcp.js` is a stdio MCP server over the session history. It is
+read-only except for `delete_transactions`, which prunes records from disk
+(filters like `list_transactions`, plus `dryRun`; refuses an unfiltered wipe
+unless `confirmAll:true`; pinned copies need `includeSaved:true`).
 Tools: `list_transactions`, `get_transaction`, `search_bodies`,
-`diff_transactions`, `list_saved`, `get_saved`, `summarize_session`.
+`diff_transactions`, `list_saved`, `get_saved`, `summarize_session`,
+`delete_transactions`.
 Data dir: `--dir`, or `$LOUIE_DATA_DIR`, else the app default. Persistence is
 opt-in (`persist.enabled`), 7-day retention, 512 KB body cap.

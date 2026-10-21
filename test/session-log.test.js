@@ -90,6 +90,20 @@ test('saved copies are read-only and listed', () => {
   assert.strictEqual(list[0].name, s.name);
 });
 
+test('save names stay unique within the same millisecond', () => {
+  const log = new SessionLog({ dir: tmp(), enabled: true });
+  const tx = makeTx();
+  const names = new Set();
+  for (let i = 0; i < 8; i++) {
+    const s = log.save(tx, { full: true });
+    assert.ok(fs.existsSync(s.path), 'saved file must exist');
+    names.add(s.name);
+  }
+  assert.strictEqual(names.size, 8, 'every pinned copy needs a distinct name');
+  assert.strictEqual(log.listSaved().length, 8);
+  assert.ok(log.getSaved([...names][0]), 'pinned copies stay retrievable');
+});
+
 test('prune removes session files older than retention, keeps recent', () => {
   const dir = tmp();
   const log = new SessionLog({ dir, enabled: true, retentionDays: 7 });

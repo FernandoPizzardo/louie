@@ -60,10 +60,10 @@ const parse = (r) => JSON.parse(r.result.content[0].text);
   await call('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '0' } });
   child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
 
-  await test('tools/list exposes read-only tools', async () => {
+  await test('tools/list exposes the expected tools', async () => {
     const r = await call('tools/list', {});
     const names = r.result.tools.map((t) => t.name);
-    for (const n of ['list_transactions', 'get_transaction', 'search_bodies', 'diff_transactions', 'list_saved', 'get_saved', 'summarize_session']) {
+    for (const n of ['list_transactions', 'get_transaction', 'search_bodies', 'diff_transactions', 'list_saved', 'get_saved', 'summarize_session', 'delete_transactions']) {
       assert.ok(names.includes(n), `missing ${n}`);
     }
   });
@@ -115,6 +115,40 @@ const parse = (r) => JSON.parse(r.result.content[0].text);
   await test('unknown tool returns a JSON-RPC error', async () => {
     const r = await tool('nope', {});
     assert.ok(r.error && /unknown tool/.test(r.error.message), JSON.stringify(r));
+  });
+
+  await test('delete_transactions refuses an unbounded wipe', async () => {
+    const r = await tool('delete_transactions', {});
+    assert.ok(r.result.isError, JSON.stringify(r));
+    const list = parse(await tool('list_transactions', {}));
+    assert.strictEqual(list.count, 3);
+  });
+
+  await test('delete_transactions dryRun previews without writing', async () => {
+    const r = parse(await tool('delete_transactions', { host: 'api.example.com', dryRun: true }));
+    assert.strictEqual(r.deleted, 0);
+    assert.ok(r.matched >= 3, `matched ${r.matched}`);
+    assert.strictEqual(r.savedSkipped, 1);
+    assert.strictEqual(r.freedBytes, 0);
+    assert.ok(r.wouldFreeBytes > 0);
+    const list = parse(await tool('list_transactions', {}));
+    assert.strictEqual(list.count, 3);
+  });
+
+  await test('delete_transactions removes matching session records', async () => {
+    const r = parse(await tool('delete_transactions', { host: 'api.example.com', status: 500 }));
+    assert.strictEqual(r.deleted, 1);
+    assert.ok(r.freedBytes > 0);
+    const list = parse(await tool('list_transactions', {}));
+    assert.strictEqual(list.count, 2);
+    assert.ok(!list.transactions.some((t) => t.id === 2));
+  });
+
+  await test('delete_transactions can drop pinned copies', async () => {
+    const r = parse(await tool('delete_transactions', { savedOnly: true, includeSaved: true }));
+    assert.strictEqual(r.savedDeleted, 1);
+    const ls = parse(await tool('list_saved', {}));
+    assert.strictEqual(ls.saved.length, 0);
   });
 
   child.kill();

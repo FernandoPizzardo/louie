@@ -8,7 +8,7 @@
   "main": "bin/charles-clone.js",
   "scripts": {
     "start": "node bin/charles-clone.js",
-    "test": "node test/e2e.js && node test/import.test.js && node test/session-log.test.js && node test/mcp.test.js",
+    "test": "node test/e2e.js && node test/import.test.js && node test/session-log.test.js && node test/mcp.test.js && node test/control-api.test.js",
     "mcp": "node bin/louie-mcp.js"
   },
   "engines": {

@@ -1,0 +1,24 @@
+appId: local.louie.desktop
+productName: Louie
+directories:
+  output: dist
+files:
+  - src/**/*
+  - package.json
+# The engine stays dependency-free, so it is copied as plain files. The web UI
+# is the built output of web/. main.js reads these from process.resourcesPath.
+extraResources:
+  - from: ../bin
+    to: engine/bin
+  - from: ../lib
+    to: engine/lib
+  - from: ../web/dist
+    to: ui
+linux:
+  target:
+    - AppImage
+    - deb
+  category: Development
+  maintainer: Louie
+  synopsis: HTTP/HTTPS debugging proxy
+  description: Charles-style intercepting proxy with a session inspector and MCP history.

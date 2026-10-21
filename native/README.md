@@ -58,17 +58,19 @@ Control endpoints (require `x-charles-token` when a token is set):
 In headless mode the engine prints a ready line and picks an ephemeral control
 port; there is no static UI. The server is API-only (the native app is the UI).
 
-## MCP server (read-only history)
+## MCP server (history)
 
 `bin/louie-mcp.js` exposes captured calls to an MCP client over stdio. It reads
 the JSON session files directly, so it works whether or not the engine is running.
+It is read-only apart from `delete_transactions`, which prunes records from disk.
 
 Turn on **Settings (⌘,) › Session history › Store calls on disk** first (it is
 opt-in). Records are redacted before they are written (`Authorization`, `Cookie`,
 `Set-Cookie`, plus common token/password JSON fields).
 
 Tools: `list_transactions`, `get_transaction`, `search_bodies`,
-`diff_transactions`, `list_saved`, `get_saved`, `summarize_session`.
+`diff_transactions`, `list_saved`, `get_saved`, `summarize_session`,
+`delete_transactions`.
 
 Register it (copy the snippet from **Settings › Copy MCP config**):
 ```json

@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 'use strict';
 /**
- * louie-mcp.js — a read-only MCP server over Louie's session history.
+ * louie-mcp.js — an MCP server over Louie's session history.
  *
- * Speaks the Model Context Protocol over stdio and reads the JSON session files
- * directly, so it works whether or not the Louie engine is running.
+ * Speaks the Model Context Protocol over stdio and reads/writes the JSON session
+ * files directly, so it works whether or not the Louie engine is running. It is
+ * read-only apart from `delete_transactions`, which prunes captured history from
+ * disk (it never touches the live engine's in-memory store).
  *
  * Data dir: --dir <path>, or $LOUIE_DATA_DIR, else the app's default
  * (~/Library/Application Support/Louie/sessions-data) or the CLI default
@@ -30,36 +32,65 @@ function resolveDir() {
 
 const DIR = resolveDir();
 
-function readRecords() {
-  const byKey = new Map();
-  const sessions = path.join(DIR, 'sessions');
-  const saved = path.join(DIR, 'saved');
+const SESSIONS_DIR = path.join(DIR, 'sessions');
+const SAVED_DIR = path.join(DIR, 'saved');
+
+/** Session-file lines as { file, index, line, rec } (index = line number). */
+function scanSessions() {
+  const out = [];
   try {
-    for (const f of fs.readdirSync(sessions).filter((f) => f.endsWith('.jsonl')).sort()) {
+    for (const f of fs.readdirSync(SESSIONS_DIR).filter((f) => f.endsWith('.jsonl')).sort()) {
+      const full = path.join(SESSIONS_DIR, f);
       let text = '';
-      try { text = fs.readFileSync(path.join(sessions, f), 'utf8'); } catch (_) { continue; }
-      for (const line of text.split('\n')) {
-        if (!line.trim()) continue;
+      try { text = fs.readFileSync(full, 'utf8'); } catch (_) { continue; }
+      const lines = text.split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        if (!lines[i].trim()) continue;
         try {
-          const r = JSON.parse(line);
-          r.saved = false;
-          byKey.set(String(r.id), r);
+          const rec = JSON.parse(lines[i]);
+          rec.saved = false;
+          out.push({ file: full, index: i, line: lines[i], rec });
         } catch (_) {}
       }
     }
   } catch (_) {}
-  // Pinned copies mark the matching session record (and add it if absent),
-  // rather than being counted as a separate transaction.
+  return out;
+}
+
+/** Pinned copies as { file, name, rec }. */
+function scanSaved() {
+  const out = [];
   try {
-    for (const f of fs.readdirSync(saved).filter((f) => f.endsWith('.json'))) {
+    for (const f of fs.readdirSync(SAVED_DIR).filter((f) => f.endsWith('.json'))) {
       try {
-        const r = JSON.parse(fs.readFileSync(path.join(saved, f), 'utf8'));
-        r.saved = true;
-        r._file = f;
-        byKey.set(String(r.id), r);
+        const rec = JSON.parse(fs.readFileSync(path.join(SAVED_DIR, f), 'utf8'));
+        rec.saved = true;
+        rec._file = f;
+        out.push({ file: path.join(SAVED_DIR, f), name: f, rec });
       } catch (_) {}
     }
   } catch (_) {}
+  return out;
+}
+
+/** Replace a file's contents in one step, so a partial write can't corrupt it. */
+function writeAtomic(file, data) {
+  const tmp = `${file}.tmp-${process.pid}`;
+  try {
+    fs.writeFileSync(tmp, data);
+    fs.renameSync(tmp, file);
+  } catch (e) {
+    try { fs.unlinkSync(tmp); } catch (_) {}
+    throw e;
+  }
+}
+
+function readRecords() {
+  const byKey = new Map();
+  // Pinned copies mark the matching session record (and add it if absent),
+  // rather than being counted as a separate transaction.
+  for (const e of scanSessions()) byKey.set(String(e.rec.id), e.rec);
+  for (const e of scanSaved()) byKey.set(String(e.rec.id), e.rec);
   const recs = [...byKey.values()];
   recs.sort((a, b) => (b.ts || '').localeCompare(a.ts || ''));
   return recs;
@@ -212,6 +243,98 @@ const TOOLS = [
         errorRate: recs.length ? +(errors / recs.length).toFixed(3) : 0,
         hosts: Object.entries(byHost).map(([host, count]) => ({ host, count })).sort((x, y) => y.count - x.count),
         slowest,
+      };
+    },
+  },
+  {
+    name: 'delete_transactions',
+    description: 'Delete captured calls from Louie\'s session history (irreversible). ' +
+      'Uses the same filters as list_transactions, or explicit `ids`. Refuses to ' +
+      'delete everything unless confirmAll:true. Pass dryRun:true to preview what ' +
+      'would go. Pinned copies are left alone unless includeSaved:true. ' +
+      'Example: delete_transactions { host: "abs.twimg.com" } clears bulky assets.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        host: { type: 'string' }, path: { type: 'string' }, method: { type: 'string' },
+        status: { type: 'integer' }, tool: { type: 'string' },
+        since: { type: 'string', description: 'ISO timestamp lower bound' },
+        until: { type: 'string', description: 'ISO timestamp upper bound' },
+        savedOnly: { type: 'boolean' },
+        ids: { type: 'array', items: { type: 'integer' }, description: 'Explicit transaction ids to delete' },
+        includeSaved: { type: 'boolean', description: 'Also remove matching pinned copies' },
+        dryRun: { type: 'boolean', description: 'Preview matches without deleting' },
+        confirmAll: { type: 'boolean', description: 'Required to delete with no filters or ids' },
+        limit: { type: 'integer', description: 'Max matches to list in the result (default 50)' },
+      },
+    },
+    run: (a) => {
+      const ids = Array.isArray(a.ids) ? a.ids.map(Number).filter(Number.isFinite) : null;
+      const useIds = !!(ids && ids.length);
+      const hasFilter = ['host', 'path', 'method', 'status', 'tool', 'since', 'until']
+        .some((k) => a[k] !== undefined && a[k] !== '' && a[k] !== null) || a.savedOnly === true;
+      if (!useIds && !hasFilter && a.confirmAll !== true) {
+        throw new Error('refusing to delete all history: pass filters, ids, or confirmAll:true');
+      }
+
+      const isMatch = (rec, isSaved) => {
+        if (useIds) return ids.includes(Number(rec.id));
+        if (a.savedOnly && !isSaved) return false;
+        return filterRecords([rec], a).length > 0;
+      };
+
+      const includeSaved = a.includeSaved === true;
+      const preview = [];
+      const drop = new Map();        // session file -> Set(line index)
+      const bytesByFile = new Map(); // session file -> bytes that would be freed
+      let matched = 0, wouldFreeBytes = 0, savedSkipped = 0;
+      const savedHits = [];
+
+      for (const e of scanSessions()) {
+        if (!isMatch(e.rec, false)) continue;
+        matched++;
+        const bytes = Buffer.byteLength(e.line) + 1;
+        wouldFreeBytes += bytes;
+        bytesByFile.set(e.file, (bytesByFile.get(e.file) || 0) + bytes);
+        if (!drop.has(e.file)) drop.set(e.file, new Set());
+        drop.get(e.file).add(e.index);
+        if (preview.length < (a.limit || 50)) preview.push(summary(e.rec));
+      }
+      for (const e of scanSaved()) {
+        if (!isMatch(e.rec, true)) continue;
+        matched++;
+        if (includeSaved) savedHits.push({ ...e, bytes: (() => { try { return fs.statSync(e.file).size; } catch (_) { return 0; } })() });
+        else savedSkipped++;
+      }
+
+      const plan = [...drop.entries()].map(([file, idx]) => ({ file: path.basename(file), removed: idx.size, bytes: bytesByFile.get(file) || 0 }));
+      for (const h of savedHits) plan.push({ file: h.name, removed: 1, bytes: h.bytes });
+
+      let deleted = 0, savedDeleted = 0, freedBytes = 0;
+      if (!a.dryRun) {
+        for (const [file, idx] of drop) {
+          try {
+            const lines = fs.readFileSync(file, 'utf8').split('\n');
+            writeAtomic(file, lines.filter((_, i) => !idx.has(i)).join('\n'));
+            deleted += idx.size;
+          } catch (_) {}
+        }
+        for (const h of savedHits) {
+          try { fs.unlinkSync(h.file); savedDeleted++; } catch (_) {}
+        }
+        freedBytes = plan.reduce((s, p) => s + p.bytes, 0);
+      }
+
+      return {
+        dryRun: !!a.dryRun,
+        matched,
+        deleted,
+        savedDeleted,
+        savedSkipped,
+        wouldFreeBytes,
+        freedBytes,
+        files: plan,
+        transactions: preview,
       };
     },
   },
