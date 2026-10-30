@@ -8,3 +8,6 @@ node_modules/
 native/.build/
 native/dist/
 native/.swiftpm/
+
+# electron-builder output
+electron/dist/

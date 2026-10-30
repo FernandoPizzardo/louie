@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react'
-import { Monitor, Moon, Settings, ShieldCheck, Sun, Trash2 } from 'lucide-react'
+import { Monitor, Moon, Settings, ShieldCheck, Sparkles, Sun, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
+import { AboutDialog } from '@/components/about-dialog'
 import { Inspector } from '@/components/inspector'
 import { SettingsDialog } from '@/components/settings-dialog'
 import { SetupDialog } from '@/components/setup-dialog'
@@ -29,6 +30,9 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [setupOpen, setSetupOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  // The AI disclosure greets every launch so nobody mistakes this for a
+  // commercially supported product.
+  const [aboutOpen, setAboutOpen] = useState(true)
 
   const all = useMemo(
     () => Array.from(engine.txs.values()).sort((a, b) => b.id - a.id),
@@ -55,6 +59,16 @@ export default function App() {
     <div className="flex h-svh flex-col bg-background text-foreground">
       <header className="flex flex-wrap items-center gap-3 border-b px-4 py-2">
         <h1 className="text-base font-semibold tracking-tight">Louie</h1>
+        <button
+          type="button"
+          onClick={() => setAboutOpen(true)}
+          title="Louie is an AI-generated application. Click for details."
+          className="cursor-pointer"
+        >
+          <Badge variant="outline" className="gap-1 border-amber-500/50 text-amber-700 dark:text-amber-400">
+            <Sparkles className="size-3" /> AI-generated
+          </Badge>
+        </button>
         <Separator orientation="vertical" className="h-5" />
 
         <div className="flex items-center gap-2">
@@ -87,6 +101,9 @@ export default function App() {
         </div>
 
         <div className="ml-auto flex items-center gap-2">
+          <Button variant="ghost" size="sm" onClick={() => setAboutOpen(true)}>
+            <Sparkles /> About
+          </Button>
           <Button variant="ghost" size="sm" onClick={() => setSetupOpen(true)}>
             <ShieldCheck /> Setup
           </Button>
@@ -130,6 +147,7 @@ export default function App() {
         )}
       </footer>
 
+      <AboutDialog open={aboutOpen} onOpenChange={setAboutOpen} />
       <SetupDialog open={setupOpen} onOpenChange={setSetupOpen} />
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
       <TokenDialog

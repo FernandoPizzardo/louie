@@ -1,5 +1,6 @@
 appId: local.louie.desktop
 productName: Louie
+copyright: Copyright © 2026 Fernando Pizzardo
 directories:
   output: dist
 files:
@@ -19,11 +20,17 @@ linux:
     - AppImage
     - deb
   category: Development
-  maintainer: Louie
+  maintainer: Fernando Pizzardo
   synopsis: HTTP/HTTPS debugging proxy
   description: Charles-style intercepting proxy with a session inspector and MCP history.
 win:
   target:
     - nsis
     - portable
-  description: Charles-style intercepting proxy with a session inspector and MCP history.
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Louie

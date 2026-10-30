@@ -3,7 +3,9 @@
   "productName": "Louie",
   "version": "1.0.0",
   "private": true,
-  "description": "Desktop shell for the Louie engine and web UI (Linux first).",
+  "author": "Fernando Pizzardo",
+  "description": "Louie - Charles-style HTTP/HTTPS intercepting proxy. AI-generated app; desktop shell for Linux and Windows.",
+  "homepage": "https://github.com/FernandoPizzardo/louie",
   "main": "src/main.js",
   "scripts": {
     "build:ui": "npm --prefix ../web run build",
