@@ -22,6 +22,7 @@ const assert = require('assert');
 const { CertificateAuthority } = require('../lib/ca');
 const { Store } = require('../lib/store');
 const { ToolPipeline, locMatches } = require('../lib/tools');
+const { BreakpointManager } = require('../lib/breakpoint');
 const { ProxyEngine } = require('../lib/proxy');
 const { WebServer } = require('../lib/web');
 const { SessionLog } = require('../lib/session-log');
@@ -134,9 +135,11 @@ async function main() {
   // while still exercising a real CONNECT -> forged-leaf MITM.
   config.sslLocations = [{ host: 'localhost', port: httpsOrigin.port }];
   const tools = new ToolPipeline(config);
+  const breakpoints = new BreakpointManager({ config, store });
+  tools.breakpoints = breakpoints;
   const sessionLog = new SessionLog({ dir: path.join(caDir, 'session-data'), enabled: false, redact: config.redact });
   const proxy = new ProxyEngine({ ca, store, tools });
-  const web = new WebServer({ store, tools, ca, config, sessionLog });
+  const web = new WebServer({ store, tools, ca, config, sessionLog, breakpoints });
 
   await new Promise((r) => proxy.listen(0, '127.0.0.1', r));
   await new Promise((r) => web.listen(0, '127.0.0.1', r));
@@ -520,6 +523,167 @@ async function main() {
     assert.match(net.cerUrl, /^http:\/\/[^/]+\/ca\.cer$/);
   });
 
+  // 11. Breakpoints (interception). See lib/breakpoint.js.
+  //
+  // The origin echoes the request so edits are observable end-to-end.
+  const echoOrigin = await new Promise((resolve) => {
+    const srv = http.createServer((req, res) => {
+      const c = [];
+      req.on('data', (d) => c.push(d));
+      req.on('end', () => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ method: req.method, path: req.url, body: Buffer.concat(c).toString() }));
+      });
+    });
+    srv.listen(0, '127.0.0.1', () => resolve({ srv, port: srv.address().port }));
+  });
+  const echoUrl = `http://127.0.0.1:${echoOrigin.port}/echo`;
+
+  /** Wait until a pending breakpoint exists for `path`, then return it. */
+  async function waitForBreakpoint(pathSuffix, ms = 4000) {
+    const t0 = Date.now();
+    while (Date.now() - t0 < ms) {
+      const pending = JSON.parse(await webGet(webPort, '/api/breakpoints/pending'));
+      const hit = pending.find((h) => (h.summary.path || '').includes(pathSuffix));
+      if (hit) return hit;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    throw new Error(`no breakpoint pending for ${pathSuffix}`);
+  }
+
+  function setBreakpoints(rules, extra = {}) {
+    config.breakpoints = { enabled: true, timeoutMs: 15000, rules, ...extra };
+    breakpoints.setConfig(config);
+  }
+
+  await test('breakpoints are opt-in and off by default', () => {
+    assert.strictEqual(config.breakpoints.enabled, false);
+    assert.deepStrictEqual(config.breakpoints.rules, []);
+    breakpoints.setConfig(config);
+    assert.strictEqual(breakpoints.matchRule({ scheme: 'http', host: 'x', port: 80, path: '/' }, 'request'), null);
+  });
+
+  await test('request breakpoint suspends the call until the client continues', async () => {
+    setBreakpoints([{ enabled: true, scope: 'request', location: { host: '127.0.0.1', port: echoOrigin.port } }]);
+    const call = curlProxy(proxyPort, echoUrl);
+    const hit = await waitForBreakpoint('/echo');
+    assert.strictEqual(hit.phase, 'request');
+    assert.strictEqual(hit.request.method, 'GET');
+    assert.ok(hit.deadline > Date.now(), 'hit should carry a deadline');
+
+    const r = await webPost(webPort, `/api/breakpoint/${hit.id}/continue`, {});
+    assert.strictEqual(r.ok, true);
+    assert.strictEqual(r.action, 'continue');
+
+    const res = await call;
+    assert.ok(res.ok, 'curl failed: ' + res.body);
+    assert.strictEqual(JSON.parse(res.body).path, '/echo', 'request should reach the origin unmodified');
+    assert.strictEqual(breakpoints.pending.size, 0, 'nothing should stay pending');
+  });
+
+  await test('request breakpoint edit rewrites method, path and body before forwarding', async () => {
+    setBreakpoints([{ enabled: true, scope: 'request', location: { host: '127.0.0.1', port: echoOrigin.port } }]);
+    const call = curlProxy(proxyPort, echoUrl);
+    const hit = await waitForBreakpoint('/echo');
+    await webPost(webPort, `/api/breakpoint/${hit.id}/edit`, {
+      request: { method: 'POST', url: `http://127.0.0.1:${echoOrigin.port}/edited?x=1`, body: { type: 'text', text: 'EDITED-BODY' } },
+    });
+    const res = await call;
+    assert.ok(res.ok, 'curl failed: ' + res.body);
+    const j = JSON.parse(res.body);
+    assert.strictEqual(j.method, 'POST', 'method edit should reach the origin');
+    assert.strictEqual(j.path, '/edited?x=1', 'URL edit should reach the origin');
+    assert.strictEqual(j.body, 'EDITED-BODY', 'body edit should reach the origin');
+  });
+
+  await test('request breakpoint abort drops the connection', async () => {
+    setBreakpoints([{ enabled: true, scope: 'request', location: { host: '127.0.0.1', port: echoOrigin.port } }]);
+    const call = curlProxy(proxyPort, echoUrl);
+    const hit = await waitForBreakpoint('/echo');
+    await webPost(webPort, `/api/breakpoint/${hit.id}/abort`, {});
+    const res = await call;
+    assert.ok(!res.ok, 'an aborted request must not get a response: ' + res.body);
+  });
+
+  await test('response breakpoint edits status, headers and body', async () => {
+    setBreakpoints([{ enabled: true, scope: 'response', location: { host: '127.0.0.1', port: origin.port } }]);
+    const call = curlProxy(proxyPort, `http://127.0.0.1:${origin.port}/bp-response`);
+    const hit = await waitForBreakpoint('/bp-response');
+    assert.strictEqual(hit.phase, 'response');
+    assert.strictEqual(hit.response.status, 200);
+    await webPost(webPort, `/api/breakpoint/${hit.id}/edit`, {
+      response: {
+        status: 418,
+        headers: { 'content-type': 'text/plain', 'x-bp': 'yes' },
+        body: { type: 'text', text: 'TEAPOT' },
+      },
+    });
+    const res = await call;
+    assert.ok(res.ok, 'curl failed: ' + res.body);
+    assert.match(res.body, /TEAPOT/, 'edited body should reach the client');
+    // The transaction reflects the edit too.
+    const list = JSON.parse(await webGet(webPort, '/api/transactions'));
+    const row = [...list].reverse().find((t) => t.path === '/bp-response');
+    assert.ok(row, 'transaction should be recorded');
+    assert.strictEqual(row.status, 418, 'recorded status should be the edited one');
+    assert.ok((row.notes || []).some((n) => n.tool === 'Breakpoint'), 'notes should mention the breakpoint');
+  });
+
+  await test('response breakpoint abort drops the client connection', async () => {
+    setBreakpoints([{ enabled: true, scope: 'response', location: { host: '127.0.0.1', port: origin.port } }]);
+    const call = curlProxy(proxyPort, `http://127.0.0.1:${origin.port}/bp-abort`);
+    const hit = await waitForBreakpoint('/bp-abort');
+    await webPost(webPort, `/api/breakpoint/${hit.id}/abort`, {});
+    const res = await call;
+    assert.ok(!res.ok, 'an aborted response must not be delivered: ' + res.body);
+  });
+
+  await test('breakpoint rules respect their location', async () => {
+    setBreakpoints([{ enabled: true, scope: 'both', location: { host: 'nomatch.example' } }]);
+    const res = await curlProxy(proxyPort, echoUrl);
+    assert.ok(res.ok, 'curl failed: ' + res.body);
+    assert.strictEqual(breakpoints.pending.size, 0, 'a non-matching location must not pause');
+  });
+
+  await test('breakpoint timeout releases the transaction unmodified', async () => {
+    setBreakpoints([{ enabled: true, scope: 'request', location: { host: '127.0.0.1', port: echoOrigin.port } }], { timeoutMs: 120 });
+    const t0 = Date.now();
+    const res = await curlProxy(proxyPort, echoUrl);
+    const dt = Date.now() - t0;
+    assert.ok(res.ok, 'timed-out breakpoint should still deliver the request: ' + res.body);
+    assert.ok(dt >= 100, `expected the timeout to hold the request (~120ms), got ${dt}ms`);
+  });
+
+  await test('disabled breakpoint rules never pause', async () => {
+    setBreakpoints([{ enabled: false, scope: 'both', location: { host: '127.0.0.1', port: echoOrigin.port } }]);
+    const res = await curlProxy(proxyPort, echoUrl);
+    assert.ok(res.ok, 'curl failed: ' + res.body);
+    assert.strictEqual(breakpoints.pending.size, 0, 'a disabled rule must not pause');
+  });
+
+  await test('POST /api/config enables breakpoints and /api/breakpoints/pending reflects it', async () => {
+    await webPost(webPort, '/api/config', {
+      breakpoints: { enabled: true, timeoutMs: 15000,
+        rules: [{ enabled: true, scope: 'request', location: { host: '127.0.0.1', port: echoOrigin.port } }] },
+    });
+    const st = JSON.parse(await webGet(webPort, '/api/status'));
+    assert.strictEqual(st.breakpointsEnabled, true, 'status should report breakpoints on');
+    const call = curlProxy(proxyPort, echoUrl);
+    const hit = await waitForBreakpoint('/echo');
+    await webPost(webPort, `/api/breakpoint/${hit.id}/continue`, {});
+    await call;
+    // clearing config disables them again
+    await webPost(webPort, '/api/config', { breakpoints: { enabled: false, timeoutMs: 15000, rules: [] } });
+    const off = JSON.parse(await webGet(webPort, '/api/status'));
+    assert.strictEqual(off.breakpointsEnabled, false);
+  });
+
+  await test('breakpoint routes are 404 for unknown ids', async () => {
+    const r = await webPost(webPort, '/api/breakpoint/999999/continue', {});
+    assert.strictEqual(r.ok, false);
+    assert.strictEqual(r.error, 'not found');
+  });
+
   // (The former web-GUI tests — app.css [hidden] and the Tools editor wiring —
   //  were removed along with public/. The native Louie app is the only UI.)
 
@@ -543,7 +707,9 @@ async function main() {
   });
 
   // cleanup
-  origin.srv.close(); httpsOrigin.srv.close(); proxy.close(); web.server.close();
+  breakpoints.releaseAll();
+  origin.srv.close(); httpsOrigin.srv.close(); echoOrigin.srv.close();
+  proxy.close(); web.server.close();
 
   console.log(`\n${passed} passed, ${failed} failed\n`);
   process.exit(failed ? 1 : 0);

@@ -9,9 +9,13 @@ reimplementation in the spirit of Charles Proxy. It has two parts:
 
 - **Engine** (Node, `bin/` + `lib/`): the proxy, MITM, tool pipeline, control API,
   and the MCP server. No third-party dependencies.
-- **App** (`native/`): a SwiftUI macOS app (SwiftPM) that drives the engine over a
-  token-authenticated loopback control API. The app is the only UI; the static
-  web GUI was retired.
+- **Clients** of the token-authenticated loopback control API:
+  - **App** (`native/`): a SwiftUI macOS app (SwiftPM). The primary UI on macOS.
+  - **Desktop** (`electron/` + `web/`): an Electron shell serving the React web
+    client. Maintained for Linux and Windows, where the SwiftUI app cannot run.
+
+  The engine server is API-only (it serves no static files); each client ships
+  its own UI.
 
 ## Layout
 
@@ -19,7 +23,8 @@ reimplementation in the spirit of Charles Proxy. It has two parts:
 bin/charles-clone.js   engine entry point (CLI + headless for the app)
 bin/louie-mcp.js       MCP server over session history (read-only + delete_transactions)
 lib/proxy.js           HTTP forward proxy, CONNECT, MITM, HTTP/2
-lib/tools.js           tool pipeline (Block List, Map, Rewrite, Throttle, ...)
+lib/tools.js           tool pipeline (Breakpoints, Block List, Map, Rewrite, Throttle, ...)
+lib/breakpoint.js      request/response breakpoints (suspend, edit, resume, abort)
 lib/ca.js              root CA + per-host leaf certs (openssl)
 lib/store.js           in-memory transactions + event bus
 lib/web.js             control API (token-auth) + CA-serving listener
@@ -28,8 +33,8 @@ lib/import-charles.js  import settings from the real Charles app XML
 docs/charles-behavior.md  BEHAVIOR SPEC derived from charles.jar (read this)
 docs/control-api.md    HTTP contract for engine clients (app / web / Electron)
 web/                   React + TypeScript + shadcn/ui client of the control API (Vite)
-electron/              Desktop shell (Electron): starts the engine, serves web/dist, Linux packages
-native/                SwiftUI app (SwiftPM); see native/README.md
+electron/              Desktop shell (Electron): starts the engine, serves web/dist; Linux + Windows packages
+native/                SwiftUI app (SwiftPM), the primary macOS UI; see native/README.md
 test/                  Node tests (e2e, import, session-log, mcp, control-api)
 ```
 
@@ -75,9 +80,9 @@ node bin/charles-clone.js --import-charles          # import from the Charles ap
    not gain runtime dependencies. The web client talks only to the control API
    and never imports engine code.
 7. **The control API is an interface.** `lib/web.js` is consumed by the SwiftUI
-   app and by future web/Electron clients. When a route or SSE event changes,
-   update `docs/control-api.md` and `test/control-api.test.js` in the same
-   change.
+   app (macOS) and the Electron/web client (Linux + Windows). When a route or
+   SSE event changes, update `docs/control-api.md` and `test/control-api.test.js`
+   in the same change.
 
 ## Gotchas (learned the hard way)
 
@@ -95,8 +100,13 @@ node bin/charles-clone.js --import-charles          # import from the Charles ap
   (it copies whole directories, so just don't hard-code paths).
 - **`--exit-on-stdin-close`** is the orphan guard: the app holds the stdin pipe,
   and the engine exits when it closes. Keep it when changing startup.
-- **Tool pipeline order** matters and is asserted: Map Remote (10) → Rewrite (12)
-  → Block List (50) → Map Local (72) → No Cache → Throttle.
+- **Tool pipeline order** matters and is asserted: Breakpoints (5, request) →
+  Map Remote (10) → Rewrite (12) → Block List (50) → Map Local (72) → No Cache →
+  Throttle, then Rewrite → No Cache → Throttle → Breakpoints (response).
+- **A breakpoint must never wedge the proxy.** Every suspended transaction has a
+  deadline (`breakpoints.timeoutMs`) and auto-resumes unmodified on expiry. The
+  suspended transaction is intentionally *not* finalized, and the proxy derives
+  its upstream destination from `tx` so edits and Map Remote both re-target it.
 - **Auto-detected JS quirks.** The engine's own port can arrive as a string from
   `URL.port`; the app uses `FlexInt` to decode numbers-or-strings.
 

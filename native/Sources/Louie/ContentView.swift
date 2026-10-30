@@ -26,6 +26,7 @@ struct ContentView: View {
             if let control = engine.control {
                 store.attach(control)
                 config.attach(control)
+                Task { await store.reloadBreakpoints() }
             } else {
                 store.detach()
                 config.detach()
@@ -33,6 +34,11 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showTools) {
             ToolsView().environment(config)
+        }
+        // A breakpoint hit opens the editor; each resolved hit reveals the next.
+        .sheet(item: Binding(get: { store.editingBreakpoint },
+                             set: { store.editingBreakpoint = $0 })) { hit in
+            BreakpointView(hit: hit).environment(store)
         }
     }
 
@@ -78,6 +84,17 @@ struct ContentView: View {
                 .textFieldStyle(.roundedBorder)
                 .frame(maxWidth: 240)
             Toggle("SSL only", isOn: $store.onlySSL)
+            Toggle("Paused only", isOn: $store.showPausedOnly)
+                .disabled(store.pendingBreakpoints.isEmpty)
+            if !store.pendingBreakpoints.isEmpty {
+                Button {
+                    store.editingBreakpoint = store.pendingBreakpoints.first
+                } label: {
+                    Label("\(store.pendingBreakpoints.count) paused", systemImage: "pause.circle.fill")
+                        .foregroundStyle(.orange)
+                }
+                .help("Open the breakpoint editor")
+            }
             Spacer()
             Circle().fill(store.connected ? Color.green : Color.secondary).frame(width: 8, height: 8)
             Text(store.connected ? "live" : "offline").foregroundStyle(.secondary).font(.caption)
@@ -113,6 +130,7 @@ struct ContentView: View {
     }
 
     private func color(for s: TransactionSummary) -> Color {
+        if s.paused == true { return .orange }
         if s.error != nil { return .red }
         switch s.status ?? 0 {
         case 200..<300: return .green

@@ -47,6 +47,38 @@ struct MapRemoteRule: Codable, Equatable, Hashable {
     var to: Location
 }
 
+/// A breakpoint rule: suspend matching transactions so the user can edit them
+/// before they are forwarded (request) or delivered (response).
+struct BreakpointRule: Codable, Equatable, Hashable, Identifiable {
+    var enabled: Bool
+    var scope: String        // "request" | "response" | "both"
+    var location: Location
+
+    /// Stable identity for SwiftUI lists (locations are value types).
+    var id: String { "\(enabled)|\(scope)|\(location.hashValue)" }
+
+    init(enabled: Bool = true, scope: String = "both", location: Location = Location(host: "*")) {
+        self.enabled = enabled; self.scope = scope; self.location = location
+    }
+}
+
+/// The `breakpoints` config section. `enabled` is the master switch.
+struct BreakpointsConfig: Codable, Equatable {
+    var enabled = false
+    var timeoutMs = 120000
+    var rules: [BreakpointRule] = []
+
+    enum CodingKeys: String, CodingKey { case enabled, timeoutMs, rules }
+
+    init() {}
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
+        timeoutMs = try c.decodeIfPresent(Int.self, forKey: .timeoutMs) ?? 120000
+        rules = try c.decodeIfPresent([BreakpointRule].self, forKey: .rules) ?? []
+    }
+}
+
 struct MapLocalRule: Codable, Equatable, Hashable {
     var location: Location
     var localPath: String
@@ -99,10 +131,12 @@ struct ToolConfig: Codable, Equatable {
     var mapLocal: [MapLocalRule] = []
     var rewrite: [RewriteSet] = []
     var throttle = Throttle()
+    var breakpoints = BreakpointsConfig()
     var sslLocations: [Location] = []
 
     enum CodingKeys: String, CodingKey {
-        case enabled, blockAction, blocklist, mapRemote, mapLocal, rewrite, throttle, sslLocations
+        case enabled, blockAction, blocklist, mapRemote, mapLocal, rewrite, throttle,
+             breakpoints, sslLocations
     }
 
     init() {}
@@ -115,6 +149,7 @@ struct ToolConfig: Codable, Equatable {
         mapLocal = try c.decodeIfPresent([MapLocalRule].self, forKey: .mapLocal) ?? []
         rewrite = try c.decodeIfPresent([RewriteSet].self, forKey: .rewrite) ?? []
         throttle = try c.decodeIfPresent(Throttle.self, forKey: .throttle) ?? Throttle()
+        breakpoints = try c.decodeIfPresent(BreakpointsConfig.self, forKey: .breakpoints) ?? BreakpointsConfig()
         sslLocations = try c.decodeIfPresent([Location].self, forKey: .sslLocations) ?? []
     }
 }

@@ -24,12 +24,14 @@ listener (below) is **not** token-protected, because phones fetch it directly.
 
 ### `GET /api/transactions`
 
-Returns an array of transaction summaries, oldest first, no bodies:
+Returns an array of transaction summaries, oldest first, no bodies. `paused` is
+`true` while a breakpoint holds the call:
 
 ```json
 [{ "id": 1, "scheme": "https", "method": "GET", "host": "api.example.com",
    "port": 443, "path": "/v1/x", "status": 200, "durationMs": 12,
    "sslProxied": true, "tunneled": false, "error": null, "complete": true,
+   "paused": false,
    "reqSize": 0, "resSize": 32, "contentType": "application/json",
    "notes": [], "start": 1792015376000 }]
 ```
@@ -100,8 +102,72 @@ Also emits a `recording` SSE event.
 
 ```json
 { "proxyPort": 8888, "webPort": 8889, "recording": true, "count": 12,
-  "leafCertsGenerated": 3, "sslLocations": [...], "enabled": {"blocklist":false, ...} }
+  "leafCertsGenerated": 3, "sslLocations": [...], "enabled": {"blocklist":false, ...},
+  "breakpointsEnabled": false, "pendingBreakpoints": 0 }
 ```
+
+## Breakpoints (interception)
+
+A breakpoint rule suspends a matching transaction until a client resumes it. The
+engine's `lib/breakpoint.js` holds the suspended call, emits a `breakpoint` SSE
+frame and waits for one of the routes below. If nothing answers within
+`breakpoints.timeoutMs` (default 120000) the transaction is released unmodified,
+so the proxy can never wedge.
+
+Rules live in the config (`POST /api/config` accepts the whole section):
+
+```json
+{ "breakpoints": { "enabled": true, "timeoutMs": 120000,
+    "rules": [{ "enabled": true, "scope": "both", "location": { "host": "api.example.com" } }] } }
+```
+
+`scope` is `request`, `response`, or `both`. A rule's `location` uses the same
+canonical-URL matching as the other tools (see `docs/charles-behavior.md`).
+
+### `GET /api/breakpoints/pending`
+
+Every suspended transaction, oldest first:
+
+```json
+[{ "id": 1, "transactionId": 42, "phase": "request", "deadline": 1792015496000,
+   "summary": { <transaction summary> },
+   "request": { "method": "POST", "url": "https://api.example.com/v1/x",
+                "headers": {...},
+                "body": { "type": "text", "text": "...", "editable": true } },
+   "response": { "status": 200, "headers": {...},
+                 "body": { "type": "empty", "text": "" } } }]
+```
+
+`body.type` is `empty`, `text`, or `binary`; `editable` is `false` for binary
+bodies, which a client must not modify.
+
+### `POST /api/breakpoint/:id/continue`
+
+Resumes with no changes. `200 {"ok":true,"transactionId":42,"action":"continue"}`,
+or `404 {"ok":false,"error":"not found"}`.
+
+### `POST /api/breakpoint/:id/abort`
+
+Drops the connection (the client sees it die). Returns
+`{"ok":true,"transactionId":42,"action":"abort"}` or `404`.
+
+### `POST /api/breakpoint/:id/edit`
+
+Applies the edits, then resumes. Only the side matching the hit's `phase` is
+honoured:
+
+```json
+{ "request":  { "method": "PUT", "url": "https://...",
+                 "headers": {"x-a": "1"},
+                 "body": { "type": "text", "text": "..." } },
+  "response": { "status": 418, "headers": {...},
+                "body": { "type": "text", "text": "..." } } }
+```
+
+Returns `{"ok":true,"transactionId":42,"action":"continue","edited":true}`, or
+`404 {"ok":false,"error":"not found"}`. Editing a URL re-targets the upstream
+request (scheme/host/port/path/query). Editing a body recomputes `content-length`
+and drops `content-encoding`.
 
 ### `GET /api/ca`
 
@@ -184,7 +250,17 @@ data: {}
 
 event: recording
 data: {"on":false}
+
+event: breakpoint
+data: {<pending hit, as in GET /api/breakpoints/pending>, "pending":true}
+
+event: breakpoint
+data: {"id":1,"transactionId":42,"action":"continue","pending":false}
 ```
+
+A `breakpoint` frame with `pending:true` also carries the paused transaction's
+`summary`, which is pushed as a `tx` frame first so the table can show it as
+paused. Resolving a hit emits a `pending:false` frame.
 
 `tx` is emitted on both `tx:new` and `tx:update`. Comment pings (`: ping`) are
 sent every 25 s to keep the connection alive.

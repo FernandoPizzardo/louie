@@ -59,6 +59,7 @@ struct TransactionSummary: Decodable, Identifiable, Equatable {
     let tunneled: Bool?
     let error: String?
     let complete: Bool?
+    let paused: Bool?
     let reqSize: Int?
     let resSize: Int?
     let contentType: String?
@@ -66,6 +67,7 @@ struct TransactionSummary: Decodable, Identifiable, Equatable {
     let start: Double?
 
     var statusText: String {
+        if paused == true { return "⏸" }
         if let error, !error.isEmpty { return "ERR" }
         if tunneled == true { return "—" }
         if let status, status > 0 { return String(status) }
@@ -75,6 +77,11 @@ struct TransactionSummary: Decodable, Identifiable, Equatable {
         let h = host ?? ""
         if let p = port?.value, p != 80, p != 443 { return "\(h):\(p)" }
         return h
+    }
+    var summaryLine: String {
+        let s = method ?? ""
+        let url = "\(scheme ?? "")://\(host ?? "")\(path ?? "")"
+        return "\(s) \(url) · \(durationMs ?? 0)ms"
     }
 }
 
@@ -157,6 +164,91 @@ struct SaveResult: Decodable {
     let error: String?
 }
 
+// MARK: - Breakpoints (interception)
+
+/// One side of a suspended transaction: what the client may edit.
+struct BreakpointRequest: Codable, Equatable {
+    var method: String?
+    var url: String?
+    var headers: [String: String]?
+    var body: BreakpointBody?
+}
+
+struct BreakpointResponse: Codable, Equatable {
+    var status: Int?
+    var headers: [String: String]?
+    var body: BreakpointBody?
+}
+
+/// A body snapshot. `editable` is false for binary bodies, which must be left
+/// untouched (`type` is `empty`, `text` or `binary`).
+struct BreakpointBody: Codable, Equatable {
+    var type: String = "empty"
+    var text: String = ""
+    var editable: Bool? = nil
+}
+
+/// A pending breakpoint pushed by the engine (`event: breakpoint` / `GET
+/// /api/breakpoints/pending`). Mirrors the engine's `hitPayload` in
+/// lib/breakpoint.js.
+struct BreakpointHit: Decodable, Identifiable, Equatable {
+    let id: Int
+    let transactionId: Int
+    let phase: String            // "request" | "response"
+    let deadline: Double?
+    let summary: TransactionSummary
+    let request: BreakpointRequest
+    let response: BreakpointResponse
+}
+
+/// The body of a breakpoint SSE frame. `pending: true` carries the hit;
+/// `pending: false` only reports that a hit was resolved.
+struct BreakpointEvent: Decodable {
+    let id: Int
+    let pending: Bool?
+    let transactionId: Int?
+    let action: String?
+    let phase: String?
+    let summary: TransactionSummary?
+    let request: BreakpointRequest?
+    let response: BreakpointResponse?
+    let deadline: Double?
+
+    var hit: BreakpointHit? {
+        guard let transactionId, let phase, let summary, let request, let response else { return nil }
+        return BreakpointHit(id: id, transactionId: transactionId, phase: phase,
+                             deadline: deadline, summary: summary,
+                             request: request, response: response)
+    }
+}
+
+/// Body for `POST /api/breakpoint/:id/{continue,edit}`.
+struct BreakpointEdit: Encodable {
+    let request: Request?
+    let response: Response?
+
+    struct Request: Encodable {
+        var method: String?
+        var url: String?
+        var headers: [String: String]?
+        var body: BreakpointBody?
+    }
+    struct Response: Encodable {
+        var status: Int?
+        var headers: [String: String]?
+        var body: BreakpointBody?
+    }
+}
+
+/// Response from `POST /api/breakpoint/:id/*`.
+struct BreakpointResult: Decodable {
+    let ok: Bool?
+    let transactionId: Int?
+    let action: String?
+    let edited: Bool?
+    let error: String?
+}
+
 /// `GET/POST /api/persist`.
 struct PersistInfo: Decodable, Equatable {
     var enabled: Bool? = nil
@@ -193,4 +285,6 @@ struct EngineStatus: Decodable {
     let recording: Bool?
     let count: Int?
     let leafCertsGenerated: Int?
+    let breakpointsEnabled: Bool?
+    let pendingBreakpoints: Int?
 }

@@ -17,6 +17,7 @@ const { load } = require('../lib/config');
 const { CertificateAuthority } = require('../lib/ca');
 const { Store } = require('../lib/store');
 const { ToolPipeline } = require('../lib/tools');
+const { BreakpointManager } = require('../lib/breakpoint');
 const { ProxyEngine } = require('../lib/proxy');
 const { WebServer } = require('../lib/web');
 const { SessionLog } = require('../lib/session-log');
@@ -101,6 +102,10 @@ function main() {
   const created = ca.ensureRoot();
   const store = new Store();
   const tools = new ToolPipeline(config);
+  // Breakpoints (interception): suspends matching transactions until the client
+  // answers over the control API. Shares the store's event bus for `breakpoint`.
+  const breakpoints = new BreakpointManager({ config, store });
+  tools.breakpoints = breakpoints;
 
   // Durable, redacted session history for the MCP server (opt-in).
   const persistDir = (config.persist && config.persist.dir)
@@ -119,12 +124,11 @@ function main() {
   }
 
   const proxy = new ProxyEngine({ ca, store, tools });
-  const web = new WebServer({ store, tools, ca, config, token: args.token, sessionLog, proxy });
+  const web = new WebServer({ store, tools, ca, config, token: args.token, sessionLog, proxy, breakpoints });
 
   // Headless mode: pick an ephemeral control port and machine-readable output.
   if (args.headless) {
     config.webPort = 0;
-    config.logLevel = 'quiet';
   }
 
   proxy.listen(config.proxyPort, config.bindHost, () => {
@@ -169,7 +173,11 @@ function main() {
     process.exit(1);
   });
 
-  const shutdown = () => { console.log('\nshutting down…'); proxy.close(); web.server.close(); process.exit(0); };
+  const shutdown = () => {
+    console.log('\nshutting down…');
+    try { breakpoints.releaseAll(); } catch (_) {}
+    proxy.close(); web.server.close(); process.exit(0);
+  };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
 

@@ -84,6 +84,31 @@ In the inspector, **Save for MCP** pins one call as a read-only full-body copy
 (`saved/`). If the body is over the 512 KB cap, Louie asks whether to save the
 full body or a truncated copy. Pinned copies are exempt from the 7-day retention.
 
+## Breakpoints (live interception)
+
+**Tools › Breakpoints** adds rules that pause a matching call so you can change it
+before it is forwarded (request) or delivered (response). A rule is a location
+(host / port / path, same matching as the other tools) plus a scope: Request,
+Response, or Both.
+
+When a call is paused a sheet opens with the request (method, URL, headers,
+body) or response (status, headers, body). Buttons:
+
+- **Continue** — send it through untouched.
+- **Continue with edits** (⌘E) — send it through with your changes. Editing the
+  URL re-targets the proxy; editing a body recomputes `content-length`.
+- **Abort** — drop the connection.
+
+Paused rows show ⏸ in the session table; **Paused only** filters to them, and the
+"N paused" toolbar button reopens the editor. Hits queue up and the editor shows
+the next one as you resolve each. Every breakpoint auto-continues after
+`timeoutMs` (default 120 s) so an unattended engine can never wedge — set it in
+**Tools › Breakpoints**.
+
+Binary bodies are shown read-only. Breakpoints are off by default; turn on the
+**Breakpoints** toggle in **Tools** to arm them. The engine side lives in
+`../lib/breakpoint.js` and the contract in `../docs/control-api.md`.
+
 ## Device debugging (your own builds)
 
 **Tools › Device setup…** turns on LAN exposure and starts a listener that serves
@@ -129,3 +154,7 @@ open. `ca.key` is never served.
   in the inspector with a large-body confirm prompt.
 - **Phase 8 (done):** device debugging — LAN binding (off by default), a
   cert-only CA listener, QR codes, and iPhone/Android setup steps.
+- **Phase 9 (done):** breakpoints (live interception) — rules that pause a
+  matching request or response, a native editor sheet (edit method/URL/headers/
+  body or status/headers/body, then Continue / Continue with edits / Abort), a
+  queued-hit model over SSE, and a mandatory auto-resume timeout.

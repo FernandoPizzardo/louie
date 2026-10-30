@@ -31,6 +31,7 @@ struct ToolsView: View {
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
+                    breakpointsSection(config: config)
                     blockListSection(config: config)
                     mapRemoteSection(config: config)
                     mapLocalSection(config: config)
@@ -45,6 +46,56 @@ struct ToolsView: View {
         .frame(minWidth: 720, minHeight: 560)
         .task { if !config.loaded { await config.load() }; await config.refreshNet() }
         .sheet(isPresented: $showDevice) { DeviceSetupView().environment(config) }
+    }
+
+    // MARK: Breakpoints
+
+    private func breakpointsSection(config: ConfigStore) -> some View {
+        @Bindable var config = config
+        return GroupBox {
+            ForEach(config.draft.breakpoints.rules.indices, id: \.self) { i in
+                HStack(spacing: 6) {
+                    Toggle("", isOn: $config.draft.breakpoints.rules[i].enabled)
+                        .labelsHidden()
+                        .help("Enable this breakpoint rule")
+                    TextField("host", text: Binding(
+                        get: { config.draft.breakpoints.rules[i].location.host ?? "" },
+                        set: { config.draft.breakpoints.rules[i].location.host = $0.isEmpty ? nil : $0 }))
+                    TextField("port", text: portBinding(Binding(
+                        get: { config.draft.breakpoints.rules[i].location.port },
+                        set: { config.draft.breakpoints.rules[i].location.port = $0 }))).frame(width: 70)
+                    TextField("path", text: Binding(
+                        get: { config.draft.breakpoints.rules[i].location.path ?? "" },
+                        set: { config.draft.breakpoints.rules[i].location.path = $0.isEmpty ? nil : $0 }))
+                    Picker("", selection: $config.draft.breakpoints.rules[i].scope) {
+                        Text("Request").tag("request")
+                        Text("Response").tag("response")
+                        Text("Both").tag("both")
+                    }
+                    .labelsHidden()
+                    .frame(width: 110)
+                    Button(role: .destructive) { config.draft.breakpoints.rules.remove(at: i) } label: {
+                        Image(systemName: "trash")
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+            HStack {
+                Button("Add breakpoint") {
+                    config.draft.breakpoints.rules.append(BreakpointRule())
+                }
+                Spacer()
+                Text("Auto-resume after").font(.caption).foregroundStyle(.secondary)
+                TextField("120", value: $config.draft.breakpoints.timeoutMs, format: .number)
+                    .frame(width: 70)
+                Text("ms").font(.caption).foregroundStyle(.secondary)
+            }
+            Text("A matching call pauses until you Continue or Abort it, so you can edit it first.")
+                .font(.caption2).foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } label: {
+            Toggle("Breakpoints", isOn: $config.draft.breakpoints.enabled)
+        }
     }
 
     // MARK: Block List

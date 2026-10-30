@@ -66,7 +66,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>CFBundleDisplayName</key><string>Louie</string>
   <key>CFBundleIdentifier</key><string>local.louie.app</string>
   <key>CFBundleVersion</key><string>1</string>
-  <key>CFBundleShortVersionString</key><string>0.1.0</string>
+  <key>CFBundleShortVersionString</key><string>1.0.0</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleExecutable</key><string>Louie</string>
   <key>CFBundleIconFile</key><string>Louie</string>

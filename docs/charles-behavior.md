@@ -95,6 +95,35 @@ Other rules:
   it (falls back to ISO-8859-1, then platform default).
 - Body rules only trigger when the response content type is textual/eligible.
 
+## Breakpoints (`BreakpointTool` + event listeners)
+
+Charles' breakpoints suspend a transaction between the client and the server so it
+can be inspected and edited before it continues. In the clone this is
+`lib/breakpoint.js` (class `BreakpointManager`).
+
+- Filter order: **5** — before Map Remote, so the user edits the request before
+  any other tool sees it. The response phase runs after every other response
+  filter, so the user can override the final response.
+- A rule is `{ enabled, scope: 'request'|'response'|'both', location }`, matched
+  with the same canonical-URL regex as every other tool.
+- `config.breakpoints.enabled` is a master switch; `enabled: false` on a rule
+  disables just that rule. Both default to off.
+- On a hit the transaction is **not** finalized: it stays in the session table
+  with `paused: true` and the call blocks until the client answers.
+- The client answers over the control API (see `docs/control-api.md`):
+  `continue` (no changes), `abort` (drop the connection) or `edit`
+  (method/url/headers/body for requests; status/headers/body for responses).
+- An edit to the URL re-targets the upstream request. An edit to a body
+  recomputes `content-length` and drops `content-encoding`.
+- Binary bodies are reported as `editable: false` and are never round-tripped.
+- A hit **always** has a deadline (`timeoutMs`, default 120000). On expiry the
+  transaction continues unmodified so a headless or abandoned engine cannot
+  wedge the proxy.
+
+Divergences from Charles: the editor is a client-side sheet over the control API
+rather than an in-process Swing dialog, so more than one hit can be queued at a
+time (Charles serialises them). Edits are structural (fields), not raw HTTP bytes.
+
 ## Throttle (`com.xk72.throttle`)
 
 - A byte-pacing engine (`sdfE.edfX`) that sleeps to enforce an effective rate; it
@@ -114,6 +143,7 @@ Other rules:
 | 6 | Rewrite body encoding | Uses response charset | Always decodes/encodes UTF-8 |
 | 7 | Throttle | Rate pacing (bytes/sec) plus loss | Fixed `latency` sleep only |
 | 8 | Ordering | Filters have explicit order (Map Remote 10, Rewrite 12, Block 50, Map Local 72) | Fixed sequence inside one pipeline |
+| 9 | Breakpoints | Modal Swing editor; one at a time | Control-API handshake; hits queue; auto-resume on timeout |
 
 ## e2e failures — root cause
 
@@ -165,8 +195,12 @@ All of the above are implemented in `lib/tools.js`, with e2e coverage in
 - Rewrite decodes/re-encodes bodies with the response charset and skips
   non-textual content types.
 - Throttle adds a fixed `latency` and paces by `bandwidthDown` (KB/s).
-- Pipeline order is Map Remote (10) -> Rewrite (12) -> Block List (50) ->
-  Map Local (72) -> No Cache -> Throttle.
+- Pipeline order is Breakpoints (5, request) -> Map Remote (10) -> Rewrite (12)
+  -> Block List (50) -> Map Local (72) -> No Cache -> Throttle, then Rewrite /
+  No Cache / Throttle / Breakpoints on the response.
+- Breakpoints (`lib/breakpoint.js`) suspend a matching transaction, publish it
+  over SSE (`event: breakpoint`) and resume/abort/edit it via the control API,
+  with a mandatory timeout so the proxy never wedges.
 - MITM negotiates ALPN and serves HTTP/2 (or HTTP/1.1) to the client; upstream
   uses HTTP/2 when the origin supports it (cached ALPN probe), else HTTP/1.1.
   Push promises are never used.

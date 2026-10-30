@@ -17,6 +17,7 @@ const { CertificateAuthority } = require('../lib/ca');
 const { Store } = require('../lib/store');
 const { ToolPipeline } = require('../lib/tools');
 const { WebServer } = require('../lib/web');
+const { BreakpointManager } = require('../lib/breakpoint');
 const { SessionLog } = require('../lib/session-log');
 const { load } = require('../lib/config');
 
@@ -66,11 +67,13 @@ function request(port, method, p, { body, token } = {}) {
   config.webPort = 0;
   config.caServePort = 0; // ephemeral, so the test can't clash with port 8890
   const tools = new ToolPipeline(config);
+  const breakpoints = new BreakpointManager({ config, store });
+  tools.breakpoints = breakpoints;
   const sessionLog = new SessionLog({
     dir: path.join(dir, 'session-data'), enabled: true, maxBodyBytes: 64, redact: config.redact,
   });
   const TOKEN = 'test-token';
-  const web = new WebServer({ store, tools, ca, config, sessionLog, token: TOKEN });
+  const web = new WebServer({ store, tools, ca, config, sessionLog, token: TOKEN, breakpoints });
   await new Promise((r) => web.listen(0, '127.0.0.1', r));
   const port = web.server.address().port;
 
@@ -253,7 +256,136 @@ function request(port, method, p, { body, token } = {}) {
     req.destroy();
   });
 
-  // 11. clear
+  // 11. breakpoints
+  await test('GET /api/breakpoints/pending is an empty array with no rules', async () => {
+    const r = await request(port, 'GET', '/api/breakpoints/pending', { token: TOKEN });
+    assert.strictEqual(r.status, 200);
+    assert.deepStrictEqual(r.json, []);
+  });
+
+  await test('breakpoint routes 404 for unknown ids', async () => {
+    for (const op of ['continue', 'abort', 'edit']) {
+      const r = await request(port, 'POST', `/api/breakpoint/424242/${op}`, { token: TOKEN, body: {} });
+      assert.strictEqual(r.status, 404, `${op} should 404`);
+      assert.strictEqual(r.json.ok, false);
+      assert.strictEqual(r.json.error, 'not found');
+    }
+  });
+
+  await test('a suspended transaction appears in /api/breakpoints/pending and is resumable', async () => {
+    // Suspend a synthesized transaction against the manager directly: the API
+    // contract is what is pinned here, the proxy path is covered in e2e.js.
+    config.breakpoints = { enabled: true, timeoutMs: 10000,
+      rules: [{ enabled: true, scope: 'request', location: { host: 'api.example.com' } }] };
+    breakpoints.setConfig(config);
+    const tx = store.create({ scheme: 'https', method: 'POST', host: 'api.example.com', port: 443, path: '/bp' });
+    tx.setRequest('POST', { 'content-type': 'application/json' }, Buffer.from('{"a":1}'), '/bp');
+    const suspended = breakpoints.maybeSuspend(tx, 'request');
+
+    await waitFor(() => breakpoints.pending.size === 1);
+    const pending = await request(port, 'GET', '/api/breakpoints/pending', { token: TOKEN });
+    assert.strictEqual(pending.json.length, 1);
+    const hit = pending.json[0];
+    for (const k of ['id', 'transactionId', 'phase', 'summary', 'request', 'response', 'deadline']) {
+      assert.ok(k in hit, `hit missing ${k}`);
+    }
+    assert.strictEqual(hit.phase, 'request');
+    assert.strictEqual(hit.request.method, 'POST');
+    assert.strictEqual(hit.request.body.type, 'text');
+    assert.strictEqual(hit.request.body.editable, true);
+
+    // status reports it
+    const st = await request(port, 'GET', '/api/status', { token: TOKEN });
+    assert.strictEqual(st.json.breakpointsEnabled, true);
+    assert.strictEqual(st.json.pendingBreakpoints, 1);
+
+    const cont = await request(port, 'POST', `/api/breakpoint/${hit.id}/continue`, { token: TOKEN, body: {} });
+    assert.strictEqual(cont.status, 200);
+    assert.strictEqual(cont.json.ok, true);
+    assert.strictEqual(cont.json.action, 'continue');
+    assert.strictEqual(cont.json.transactionId, tx.id);
+    const result = await suspended;
+    assert.strictEqual(result.action, 'continue');
+    assert.strictEqual(breakpoints.pending.size, 0);
+
+    config.breakpoints = { enabled: false, timeoutMs: 10000, rules: [] };
+    breakpoints.setConfig(config);
+  });
+
+  await test('edit applies the request changes before resuming', async () => {
+    config.breakpoints = { enabled: true, timeoutMs: 10000,
+      rules: [{ enabled: true, scope: 'request', location: { host: 'api.example.com' } }] };
+    breakpoints.setConfig(config);
+    const tx = store.create({ scheme: 'https', method: 'GET', host: 'api.example.com', port: 443, path: '/edit-me' });
+    tx.setRequest('GET', {}, Buffer.alloc(0), '/edit-me');
+    const suspended = breakpoints.maybeSuspend(tx, 'request');
+    await waitFor(() => breakpoints.pending.size === 1);
+    const hit = [...breakpoints.pending.values()][0];
+
+    const r = await request(port, 'POST', `/api/breakpoint/${hit.id}/edit`, { token: TOKEN, body: {
+      request: { method: 'PUT', body: { type: 'text', text: 'PATCHED' } },
+    } });
+    assert.strictEqual(r.json.ok, true);
+    assert.strictEqual(r.json.edited, true);
+    await suspended;
+    assert.strictEqual(tx.method, 'PUT');
+    assert.strictEqual(tx.requestBody.toString(), 'PATCHED');
+    assert.strictEqual(tx.requestHeaders['content-length'], '7');
+
+    config.breakpoints = { enabled: false, timeoutMs: 10000, rules: [] };
+    breakpoints.setConfig(config);
+  });
+
+  await test('abort resolves the breakpoint with the abort action', async () => {
+    config.breakpoints = { enabled: true, timeoutMs: 10000,
+      rules: [{ enabled: true, scope: 'response', location: { host: 'api.example.com' } }] };
+    breakpoints.setConfig(config);
+    const tx = store.create({ scheme: 'https', method: 'GET', host: 'api.example.com', port: 443, path: '/abort-me' });
+    tx.setResponse(200, { 'content-type': 'text/plain' }, Buffer.from('hi'), 1);
+    const suspended = breakpoints.maybeSuspend(tx, 'response');
+    await waitFor(() => breakpoints.pending.size === 1);
+    const hit = [...breakpoints.pending.values()][0];
+    const r = await request(port, 'POST', `/api/breakpoint/${hit.id}/abort`, { token: TOKEN, body: {} });
+    assert.strictEqual(r.json.action, 'abort');
+    const result = await suspended;
+    assert.strictEqual(result.action, 'abort');
+
+    config.breakpoints = { enabled: false, timeoutMs: 10000, rules: [] };
+    breakpoints.setConfig(config);
+  });
+
+  await test('/events emits a breakpoint frame on hit and on resume', async () => {
+    const chunks = [];
+    const req = http.request({ host: '127.0.0.1', port, path: '/events', method: 'GET', headers: { 'x-charles-token': TOKEN } }, (res) => {
+      res.setEncoding('utf8');
+      res.on('data', (c) => chunks.push(c));
+    });
+    req.end();
+    await waitFor(() => chunks.join('').includes('event: hello'));
+
+    config.breakpoints = { enabled: true, timeoutMs: 10000,
+      rules: [{ enabled: true, scope: 'request', location: { host: 'sse.example.com' } }] };
+    breakpoints.setConfig(config);
+    const tx = store.create({ scheme: 'https', method: 'GET', host: 'sse.example.com', port: 443, path: '/sse' });
+    tx.setRequest('GET', {}, Buffer.alloc(0), '/sse');
+    const suspended = breakpoints.maybeSuspend(tx, 'request');
+
+    await waitFor(() => chunks.join('').includes('event: breakpoint'));
+    const text = chunks.join('');
+    assert.match(text, /event: breakpoint\ndata: \{[^\n]*"pending":true/, 'hit frame should be pending');
+
+    const hit = [...breakpoints.pending.values()][0];
+    await request(port, 'POST', `/api/breakpoint/${hit.id}/continue`, { token: TOKEN, body: {} });
+    await suspended;
+    await waitFor(() => /"pending":false/.test(chunks.join('')));
+    assert.match(chunks.join(''), /"pending":false/, 'resume frame should not be pending');
+
+    config.breakpoints = { enabled: false, timeoutMs: 10000, rules: [] };
+    breakpoints.setConfig(config);
+    req.destroy();
+  });
+
+  // 12. clear
   await test('POST /api/clear empties the session', async () => {
     const before = await request(port, 'GET', '/api/transactions', { token: TOKEN });
     assert.ok(before.json.length > 0, 'should have transactions to clear');

@@ -9,17 +9,24 @@ final class SessionStore {
     private(set) var detail: TransactionDetail?
     private(set) var recording = true
     private(set) var connected = false
+    /// Transactions currently held by a breakpoint, oldest first.
+    private(set) var pendingBreakpoints: [BreakpointHit] = []
 
     var filter = ""
     var onlySSL = false
+    var showPausedOnly = false
     var selectedID: Int?
 
     private var control: ControlClient?
     private var eventsTask: Task<Void, Never>?
 
+    /// The hit the breakpoint editor is showing (nil => sheet closed).
+    var editingBreakpoint: BreakpointHit?
+
     var filtered: [TransactionSummary] {
         rows.filter { s in
             if onlySSL && s.sslProxied != true { return false }
+            if showPausedOnly && s.paused != true { return false }
             guard !filter.isEmpty else { return true }
             let hay = "\(s.host ?? "")\(s.path ?? "")\(s.method ?? "")\(s.statusText)".lowercased()
             return hay.contains(filter.lowercased())
@@ -42,6 +49,8 @@ final class SessionStore {
         detail = nil
         selectedID = nil
         connected = false
+        pendingBreakpoints = []
+        editingBreakpoint = nil
     }
 
     func reload() async {
@@ -63,7 +72,41 @@ final class SessionStore {
 
     func clear() async {
         guard let control else { return }
-        try? await control.post("/api/clear", json: [:])
+        try? await control.post("/api/clear", json: [:]) 
+    }
+
+    // MARK: breakpoints
+
+    /// Load anything already suspended (e.g. the app was relaunched).
+    func reloadBreakpoints() async {
+        guard let control else { return }
+        if let list: [BreakpointHit] = try? await control.getJSON("/api/breakpoints/pending", as: [BreakpointHit].self) {
+            pendingBreakpoints = list
+            if editingBreakpoint == nil { editingBreakpoint = list.first }
+        }
+    }
+
+    /// Resume a suspended transaction, optionally with edits.
+    func continueBreakpoint(_ id: Int, request: BreakpointEdit.Request? = nil,
+                            response: BreakpointEdit.Response? = nil) async {
+        await resolveBreakpoint(id, path: "continue",
+                                body: BreakpointEdit(request: request, response: response))
+    }
+
+    /// Resume with the edits held by the editor sheet.
+    func applyBreakpointEdit(_ id: Int, edit: BreakpointEdit) async {
+        await resolveBreakpoint(id, path: "edit", body: edit)
+    }
+
+    /// Drop the paused transaction's connection.
+    func abortBreakpoint(_ id: Int) async {
+        await resolveBreakpoint(id, path: "abort", body: BreakpointEdit(request: nil, response: nil))
+    }
+
+    private func resolveBreakpoint(_ id: Int, path: String, body: BreakpointEdit) async {
+        guard let control else { return }
+        _ = try? await control.postCodable("/api/breakpoint/\(id)/\(path)", body, as: BreakpointResult.self)
+        await reloadBreakpoints()
     }
 
     func setRecording(_ on: Bool) async {
@@ -116,6 +159,20 @@ final class SessionStore {
             rows = []; detail = nil; selectedID = nil
         case "recording":
             if let e = try? JSONDecoder().decode(RecordingEvent.self, from: data) { recording = e.on }
+        case "breakpoint":
+            guard let e = try? JSONDecoder().decode(BreakpointEvent.self, from: data) else { return }
+            if e.pending == true, let hit = e.hit {
+                if !pendingBreakpoints.contains(where: { $0.id == hit.id }) {
+                    pendingBreakpoints.append(hit)
+                }
+                // Present the editor for the first hit; later ones queue up.
+                if editingBreakpoint == nil { editingBreakpoint = hit }
+            } else {
+                pendingBreakpoints.removeAll { $0.id == e.id }
+                if editingBreakpoint?.id == e.id {
+                    editingBreakpoint = pendingBreakpoints.first
+                }
+            }
         default:
             break
         }
