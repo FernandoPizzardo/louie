@@ -5,6 +5,7 @@ struct ContentView: View {
     @Environment(SessionStore.self) private var store
     @Environment(ConfigStore.self) private var config
     @State private var showTools = false
+    @State private var showShare = false
 
     var body: some View {
         @Bindable var engine = engine
@@ -34,6 +35,9 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showTools) {
             ToolsView().environment(config)
+        }
+        .sheet(isPresented: $showShare) {
+            ShareView().environment(config).environment(store)
         }
         // A breakpoint hit opens the editor; each resolved hit reveals the next.
         .sheet(item: Binding(get: { store.editingBreakpoint },
@@ -102,6 +106,12 @@ struct ContentView: View {
                 Task { await store.setRecording(!store.recording) }
             }
             Button("Tools…") { showTools = true }
+            Button {
+                showShare = true
+            } label: {
+                Label("Share…", systemImage: "person.2")
+            }
+            .help("Export a profile to share, or import a coworker's")
             Button("Clear") { Task { await store.clear() } }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)

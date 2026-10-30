@@ -35,6 +35,19 @@ struct ControlClient {
         _ = try await URLSession.shared.data(for: request(path, method: "POST", body: data))
     }
 
+    /// POST an `Encodable` body and return the raw response bytes.
+    func postCodableData<B: Encodable>(_ path: String, _ body: B) async throws -> Data {
+        let data = try JSONEncoder().encode(body)
+        let (respData, _) = try await URLSession.shared.data(for: request(path, method: "POST", body: data))
+        return respData
+    }
+
+    /// POST already-serialized JSON and decode the response.
+    func postDataJSON<T: Decodable>(_ path: String, _ body: Data, as: T.Type) async throws -> T {
+        let (respData, _) = try await URLSession.shared.data(for: request(path, method: "POST", body: body))
+        return try JSONDecoder().decode(T.self, from: respData)
+    }
+
     func postJSON<T: Decodable>(_ path: String, json: [String: String], as: T.Type) async throws -> T {
         let data = try JSONSerialization.data(withJSONObject: json)
         let (respData, _) = try await URLSession.shared.data(for: request(path, method: "POST", body: data))

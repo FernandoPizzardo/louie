@@ -110,4 +110,66 @@ final class ConfigStore {
             lastError = "save failed: \(error.localizedDescription)"
         }
     }
+
+    // MARK: profiles (sharing)
+
+    /// Ask the engine for a redacted profile document.
+    /// Returns the raw JSON bytes so the saved file is exactly what the engine
+    /// produced (any client-side re-encoding could only lose fidelity).
+    func exportProfile(name: String?, includeCaptures: Bool, full: Bool) async -> (name: String, fileName: String, data: Data)? {
+        guard let control else { return nil }
+        do {
+            let body = ProfileExportRequest(name: name, includeCaptures: includeCaptures, full: full)
+            let data = try await control.postCodableData("/api/profile/export", body)
+            let meta = try JSONDecoder().decode(ProfileExport.self, from: data)
+            guard meta.ok else {
+                lastError = meta.error ?? "export failed"
+                return nil
+            }
+            // The engine returns the envelope inline; re-serialize it pretty so
+            // the shared file is readable and diffable in review.
+            let object = try JSONSerialization.jsonObject(with: data)
+            guard let dict = object as? [String: Any], let profile = dict["profile"] else { return nil }
+            let pretty = try JSONSerialization.data(
+                withJSONObject: profile, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
+            return (meta.name ?? "profile", meta.fileName ?? "profile.louie.json", pretty)
+        } catch {
+            lastError = "export failed: \(error.localizedDescription)"
+            return nil
+        }
+    }
+
+    /// Validate and summarise a profile the user picked, without applying it.
+    func inspectProfile(_ data: Data) async -> ProfileInspect? {
+        guard let control else { return nil }
+        do {
+            let obj = try JSONSerialization.jsonObject(with: data)
+            let payload = try JSONSerialization.data(withJSONObject: ["profile": obj])
+            return try await control.postDataJSON("/api/profile/inspect", payload, as: ProfileInspect.self)
+        } catch {
+            lastError = "could not read profile: \(error.localizedDescription)"
+            return nil
+        }
+    }
+
+    /// Apply a profile's selected sections.
+    func importProfile(_ data: Data, sections: [String]) async -> ProfileImportResult? {
+        guard let control else { return nil }
+        do {
+            let obj = try JSONSerialization.jsonObject(with: data)
+            let payload = try JSONSerialization.data(withJSONObject: ["profile": obj, "sections": sections])
+            let r = try await control.postDataJSON("/api/profile/import", payload, as: ProfileImportResult.self)
+            await load()
+            return r
+        } catch {
+            lastError = "import failed: \(error.localizedDescription)"
+            return nil
+        }
+    }
+}
+
+private struct ProfileExportRequest: Encodable {
+    let name: String?
+    let includeCaptures: Bool
+    let full: Bool
 }

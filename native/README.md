@@ -109,6 +109,24 @@ Binary bodies are shown read-only. Breakpoints are off by default; turn on the
 **Breakpoints** toggle in **Tools** to arm them. The engine side lives in
 `../lib/breakpoint.js` and the contract in `../docs/control-api.md`.
 
+## Sharing a setup with a coworker
+
+**Share…** exports your tool configuration as a single `.louie.json` profile the
+other person can import:
+
+- **Export** — pick a name, optionally embed captured calls, then save. Captures
+  are redacted *before* they are written into the file (using the same rules as
+  local session history), and calls held by a breakpoint are skipped. The CA key,
+  the control-API token and your local paths are never included.
+- **Import** — choose a profile and Louie shows what it carries: which sections
+  and how many entries, plus a list of any embedded captures. Tick only what you
+  want, then import.
+
+An import **merges**: it switches tools on and replaces the sections you selected,
+but it never turns a tool *off* that you enabled yourself. Map Local paths from
+another machine are flagged, because they almost certainly do not exist here.
+Review an exported file before sending it — sharing is your call.
+
 ## Device debugging (your own builds)
 
 **Tools › Device setup…** turns on LAN exposure and starts a listener that serves
@@ -158,3 +176,6 @@ open. `ca.key` is never served.
   matching request or response, a native editor sheet (edit method/URL/headers/
   body or status/headers/body, then Continue / Continue with edits / Abort), a
   queued-hit model over SSE, and a mandatory auto-resume timeout.
+- **Phase 10 (done):** shareable profiles — export/import a `.louie.json` of the
+  tool configuration (optionally with redacted captures) so a team can exchange
+  setups instead of retyping them.

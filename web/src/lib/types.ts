@@ -91,6 +91,62 @@ export interface EngineConfig {
   [key: string]: unknown
 }
 
+// ---- profiles (shareable tool configuration) ----
+
+export interface ProfileExportResult {
+  ok: boolean
+  name?: string
+  fileName?: string
+  captures?: number
+  profile?: unknown
+  error?: string
+}
+
+export interface ProfileSectionCount {
+  name?: string
+  exportedAt?: string
+  louieVersion?: string
+  sections: Record<string, number>
+}
+
+export interface ProfileCaptureSummary {
+  ts?: string
+  method?: string
+  host?: string
+  port?: number | string
+  path?: string
+  status?: number
+  error?: string | null
+  notes?: string[]
+}
+
+export interface ProfileInspectResult {
+  ok: boolean
+  info?: ProfileSectionCount
+  captures?: ProfileCaptureSummary[]
+  error?: string
+}
+
+export interface ProfileImportResult {
+  ok: boolean
+  applied?: string[]
+  warnings?: string[]
+  skipped?: string[]
+  error?: string
+}
+
+/** Sections a profile can carry, with the label shown in the import picker. */
+export const PROFILE_SECTIONS = [
+  { key: 'enabled', label: 'Tool on/off switches' },
+  { key: 'blocklist', label: 'Block List' },
+  { key: 'mapRemote', label: 'Map Remote' },
+  { key: 'mapLocal', label: 'Map Local' },
+  { key: 'rewrite', label: 'Rewrite' },
+  { key: 'throttle', label: 'Throttle' },
+  { key: 'breakpoints', label: 'Breakpoints' },
+  { key: 'sslLocations', label: 'SSL Proxying locations' },
+] as const
+
 export const TOOL_KEYS = [
   { key: 'blocklist', label: 'Block List' },
   { key: 'mapRemote', label: 'Map Remote' },

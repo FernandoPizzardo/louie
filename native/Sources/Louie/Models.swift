@@ -288,3 +288,58 @@ struct EngineStatus: Decodable {
     let breakpointsEnabled: Bool?
     let pendingBreakpoints: Int?
 }
+
+// MARK: - Profiles (shareable tool configuration)
+
+/// Result of `POST /api/profile/export`. `profile` is the raw JSON the engine
+/// produced; it is written to disk verbatim so the file is exactly what the
+/// engine redacted (re-encoding here could only lose fidelity).
+struct ProfileExport: Decodable {
+    let ok: Bool
+    let name: String?
+    let fileName: String?
+    let captures: Int?
+    let error: String?
+}
+
+/// `info` from `POST /api/profile/inspect`.
+struct ProfileInfo: Decodable {
+    let name: String?
+    let exportedAt: String?
+    let louieVersion: String?
+    let sections: [String: Int]
+}
+
+/// One embedded capture, summarised.
+struct ProfileCaptureSummary: Decodable, Identifiable {
+    let ts: String?
+    let method: String?
+    let host: String?
+    let port: FlexInt?
+    let path: String?
+    let status: Int?
+    let error: String?
+    let notes: [String]?
+
+    var id: String { "\(ts ?? "")\(method ?? "")\(host ?? "")\(path ?? "")" }
+    var title: String {
+        let h = host ?? ""
+        let p = port?.value.map { ($0 == 80 || $0 == 443) ? "" : ":\($0)" } ?? ""
+        return "\(method ?? "") \(h)\(p)\(path ?? "")"
+    }
+}
+
+struct ProfileInspect: Decodable {
+    let ok: Bool
+    let info: ProfileInfo?
+    let captures: [ProfileCaptureSummary]?
+    let error: String?
+}
+
+struct ProfileImportResult: Decodable {
+    let ok: Bool
+    let applied: [String]?
+    let warnings: [String]?
+    let skipped: [String]?
+    let error: String?
+}

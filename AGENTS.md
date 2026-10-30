@@ -25,6 +25,7 @@ bin/louie-mcp.js       MCP server over session history (read-only + delete_trans
 lib/proxy.js           HTTP forward proxy, CONNECT, MITM, HTTP/2
 lib/tools.js           tool pipeline (Breakpoints, Block List, Map, Rewrite, Throttle, ...)
 lib/breakpoint.js      request/response breakpoints (suspend, edit, resume, abort)
+lib/profile.js         shareable .louie.json profiles (export/import tool config)
 lib/ca.js              root CA + per-host leaf certs (openssl)
 lib/store.js           in-memory transactions + event bus
 lib/web.js             control API (token-auth) + CA-serving listener
@@ -69,6 +70,9 @@ node bin/charles-clone.js --import-charles          # import from the Charles ap
 3. **Never break the redaction-before-write rule.** `lib/session-log.js` redacts
    `Authorization`/`Cookie`/`Set-Cookie` and token/password JSON fields *before*
    anything is written to disk. New fields must stay redacted by default.
+   This also covers **shared files**: `lib/profile.js` embeds captured calls in a
+   profile that gets sent to other people, and it must route them through
+   `SessionLog.record` rather than serializing a transaction directly.
 4. **The CA private key is never served.** `lib/web.js` serves only the public
    certificate (`/ca.cer`, `/ca.mobileconfig`). Do not expose `ca.key`.
 5. **LAN exposure is opt-in.** It defaults to off; the control API stays

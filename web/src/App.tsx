@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Monitor, Moon, Settings, ShieldCheck, Sparkles, Sun, Trash2 } from 'lucide-react'
+import { Monitor, Moon, Settings, ShieldCheck, Sparkles, Sun, Trash2, Users } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -10,6 +10,7 @@ import { AboutDialog } from '@/components/about-dialog'
 import { Inspector } from '@/components/inspector'
 import { SettingsDialog } from '@/components/settings-dialog'
 import { SetupDialog } from '@/components/setup-dialog'
+import { ShareDialog } from '@/components/share-dialog'
 import { TokenDialog } from '@/components/token-dialog'
 import { TransactionsTable } from '@/components/transactions-table'
 import { useEngine, type Conn } from '@/hooks/use-engine'
@@ -30,6 +31,7 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [setupOpen, setSetupOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [shareOpen, setShareOpen] = useState(false)
   // The AI disclosure greets every launch so nobody mistakes this for a
   // commercially supported product.
   const [aboutOpen, setAboutOpen] = useState(true)
@@ -104,6 +106,9 @@ export default function App() {
           <Button variant="ghost" size="sm" onClick={() => setAboutOpen(true)}>
             <Sparkles /> About
           </Button>
+          <Button variant="ghost" size="sm" onClick={() => setShareOpen(true)}>
+            <Users /> Share
+          </Button>
           <Button variant="ghost" size="sm" onClick={() => setSetupOpen(true)}>
             <ShieldCheck /> Setup
           </Button>
@@ -150,6 +155,11 @@ export default function App() {
       <AboutDialog open={aboutOpen} onOpenChange={setAboutOpen} />
       <SetupDialog open={setupOpen} onOpenChange={setSetupOpen} />
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <ShareDialog
+        open={shareOpen}
+        onOpenChange={setShareOpen}
+        captureCount={engine.txs.size}
+      />
       <TokenDialog
         open={engine.conn === 'unauthorized'}
         onSubmit={(token) => engine.reconnect(token)}

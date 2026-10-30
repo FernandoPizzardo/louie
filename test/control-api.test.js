@@ -226,6 +226,65 @@ function request(port, method, p, { body, token } = {}) {
     assert.strictEqual(off.json.bindHost, '127.0.0.1');
   });
 
+  // 8b. profiles (shareable tool configuration)
+  await test('POST /api/profile/export returns an envelope and no secrets', async () => {
+    const tx = store.create({ scheme: 'https', method: 'POST', host: 'api.example.com', port: 443, path: '/login' });
+    tx.setRequest('POST', { authorization: 'Bearer LEAK-ME', 'content-type': 'application/json' },
+      Buffer.from(JSON.stringify({ user: 'a', password: 'hunter2' })), '/login');
+    tx.setResponse(200, { 'content-type': 'application/json' }, Buffer.from('{"ok":true}'), 4);
+    store.finalize(tx);
+
+    const r = await request(port, 'POST', '/api/profile/export', {
+      token: TOKEN, body: { name: 'contract test', includeCaptures: true },
+    });
+    assert.strictEqual(r.status, 200);
+    assert.strictEqual(r.json.ok, true);
+    assert.ok(r.json.fileName.endsWith('.louie.json'), `bad fileName ${r.json.fileName}`);
+    assert.ok(r.json.profile, 'export should return the profile body');
+    assert.strictEqual(r.json.profile.kind, 'louie-profile');
+    assert.ok(r.json.captures >= 1, 'expected the capture to be embedded');
+    const raw = JSON.stringify(r.json.profile);
+    assert.ok(!raw.includes('LEAK-ME'), 'Authorization leaked into the exported profile');
+    assert.ok(!raw.includes('hunter2'), 'password leaked into the exported profile');
+  });
+
+  await test('POST /api/profile/inspect validates and describes without applying', async () => {
+    const exported = await request(port, 'POST', '/api/profile/export', { token: TOKEN, body: { name: 'inspect me' } });
+    const ok = await request(port, 'POST', '/api/profile/inspect', { token: TOKEN, body: { profile: exported.json.profile } });
+    assert.strictEqual(ok.status, 200);
+    assert.strictEqual(ok.json.info.name, 'inspect me');
+    assert.ok('blocklist' in ok.json.info.sections, 'sections should be described');
+
+    const bad = await request(port, 'POST', '/api/profile/inspect', { token: TOKEN, body: { profile: { kind: 'nope' } } });
+    assert.strictEqual(bad.status, 400);
+    assert.strictEqual(bad.json.ok, false);
+    assert.ok(bad.json.error, 'inspect should explain why it rejected');
+  });
+
+  await test('POST /api/profile/import merges the selected sections', async () => {
+    const profile = {
+      kind: 'louie-profile', louieProfile: 1, name: 'import me',
+      tools: {
+        blocklist: [{ host: 'imported.example.com' }],
+        enabled: { blocklist: true },
+        sslLocations: [],
+        mapRemote: [], mapLocal: [], rewrite: [],
+        throttle: { latency: 0, bandwidthDown: 0, bandwidthUp: 0, hosts: [] },
+      },
+    };
+    const r = await request(port, 'POST', '/api/profile/import', { token: TOKEN, body: { profile, sections: ['blocklist'] } });
+    assert.strictEqual(r.status, 200);
+    assert.strictEqual(r.json.ok, true);
+    assert.ok(r.json.applied.includes('blocklist'));
+
+    const cfg = await request(port, 'GET', '/api/config', { token: TOKEN });
+    assert.deepStrictEqual(cfg.json.blocklist, [{ host: 'imported.example.com' }],
+      'the imported section should be live in the config');
+
+    const bad = await request(port, 'POST', '/api/profile/import', { token: TOKEN, body: { profile: [] } });
+    assert.strictEqual(bad.status, 400);
+  });
+
   // 9. import error path
   await test('POST /api/import/charles reports a missing file', async () => {
     const r = await request(port, 'POST', '/api/import/charles', { token: TOKEN, body: { path: path.join(dir, 'nope.xml') } });

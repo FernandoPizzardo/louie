@@ -26,6 +26,7 @@ lib/ca.js              root CA + per-host leaf certificates (openssl)
 lib/store.js           in-memory transactions + event bus
 lib/web.js             control API (token-auth) + CA-serving listener
 lib/session-log.js     durable, redacted session history for the MCP server
+lib/profile.js         shareable tool profiles (export/import for teammates)
 native/                SwiftUI macOS app (SwiftPM)
 web/, electron/        React client + Electron shell (Linux, Windows)
 docs/control-api.md    the HTTP contract every client depends on
@@ -67,6 +68,17 @@ decompiled `charles.jar`.
 - A listener that serves **only** the public root certificate (`/ca.cer`,
   `/ca.mobileconfig`) — `ca.key` is never served
 - QR codes and step-by-step iPhone / Android setup
+
+**Share with a coworker**
+
+- **Export** your tools (and optionally captured calls) as one `.louie.json` profile
+  and hand it over — no more screenshots of a Rewrite config
+- Captures are **redacted before they are written** into the file, reusing the
+  same rules as local session history, and calls held by a breakpoint are skipped
+- The CA key, the control-API token and your local paths are never included
+- **Import** previews the file first and merges only the sections you tick; a
+  profile can switch tools on but never off, so it cannot disable your own setup
+- Warns when Map Local paths point at files that do not exist on your machine
 
 **History and the MCP server**
 

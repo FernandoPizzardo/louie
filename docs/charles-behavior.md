@@ -144,6 +144,7 @@ time (Charles serialises them). Edits are structural (fields), not raw HTTP byte
 | 7 | Throttle | Rate pacing (bytes/sec) plus loss | Fixed `latency` sleep only |
 | 8 | Ordering | Filters have explicit order (Map Remote 10, Rewrite 12, Block 50, Map Local 72) | Fixed sequence inside one pipeline |
 | 9 | Breakpoints | Modal Swing editor; one at a time | Control-API handshake; hits queue; auto-resume on timeout |
+| 10 | Sharing settings | Exports XML including the full app config | Profile JSON restricted to tools (+ opt-in redacted captures); merges, never clobbers |
 
 ## e2e failures — root cause
 
@@ -201,6 +202,10 @@ All of the above are implemented in `lib/tools.js`, with e2e coverage in
 - Breakpoints (`lib/breakpoint.js`) suspend a matching transaction, publish it
   over SSE (`event: breakpoint`) and resume/abort/edit it via the control API,
   with a mandatory timeout so the proxy never wedges.
+- Profiles (`lib/profile.js`) export/import the tool configuration as a single
+  shareable `.louie.json`. Captures are redacted before serialization by
+  `SessionLog.record`, and `enabled` merges key-by-key so an import can only turn
+  tools on.
 - MITM negotiates ALPN and serves HTTP/2 (or HTTP/1.1) to the client; upstream
   uses HTTP/2 when the origin supports it (cached ALPN probe), else HTTP/1.1.
   Push promises are never used.

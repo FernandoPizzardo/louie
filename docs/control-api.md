@@ -220,6 +220,83 @@ Body `{"on": true|false}`; starts/stops the CA-serving listener and returns
 Body `{"path": "<optional XML path>"}`; imports settings from the real Charles
 app and returns `{"ok":true,...report}`, or `500 {"ok":false,"error":"..."}`.
 
+### `POST /api/profile/export`
+
+Builds a **shareable profile**: the tool configuration, plus optionally redacted
+captures, in one versioned JSON envelope.
+
+Body (all optional):
+
+```json
+{ "name": "Team staging", "includeCaptures": false, "full": false,
+  "ids": [1, 2, 3], "path": "/optional/also/write/here.json" }
+```
+
+- `includeCaptures` defaults to `false`.
+- `ids` limits captures to those transaction ids; omitted means the whole session.
+- `full` keeps bodies over the persist cap.
+
+```json
+{ "ok": true, "name": "Team staging", "fileName": "Team-staging.louie.json",
+  "captures": 3, "profile": { "louieProfile": 1, "kind": "louie-profile", ... } }
+```
+
+The `profile` envelope:
+
+```json
+{ "louieProfile": 1, "kind": "louie-profile", "name": "Team staging",
+  "exportedAt": "2026-10-30T15:00:00.000Z", "louieVersion": "1.0.0",
+  "tools": { "enabled": {...}, "blockAction": "drop", "blocklist": [...],
+             "mapRemote": [...], "mapLocal": [...], "rewrite": [...],
+             "throttle": {...}, "breakpoints": {...}, "sslLocations": [...] },
+  "captures": [ <redacted transaction records> ] }
+```
+
+Guarantees — a profile is a file you send to other people:
+
+- Captures are **redacted before serialization**, using the same rules as local
+  session history (`Authorization`, `Cookie`, `Set-Cookie` and common
+  token/password fields).
+- The control-API token, the CA key/private material and the persist directory are
+  **never** written.
+- Transactions still held by a breakpoint are skipped (their response is incomplete).
+
+### `POST /api/profile/inspect`
+
+Validates a profile and summarises it **without applying anything** (the import
+preview). Body `{"profile": <envelope>}`.
+
+```json
+{ "ok": true,
+  "info": { "name": "Team staging", "exportedAt": "...", "louieVersion": "1.0.0",
+            "sections": { "blocklist": 1, "mapRemote": 2, "mapLocal": 0 } },
+  "captures": [{ "ts": "...", "method": "GET", "host": "api.example.com",
+                 "path": "/v1/x", "status": 200, "notes": ["Rewrite"] }] }
+```
+
+A non-profile or an unsupported version returns `400 {"ok":false,"error":"..."}`.
+
+### `POST /api/profile/import`
+
+Merges a profile. Body `{"profile": <envelope>, "sections": ["blocklist", ...]}`.
+`"sections"` is optional; omitted means every section the file carries.
+
+```json
+{ "ok": true, "applied": ["blocklist", "enabled"],
+  "warnings": ["Breakpoints are imported switched off until you enable them in Tools — they will pause matching traffic."],
+  "skipped": ["mapLocal"] }
+```
+
+Merge semantics:
+
+- Selectable sections: `enabled`, `blocklist`, `mapRemote`, `mapLocal`, `rewrite`,
+  `throttle`, `breakpoints`, `sslLocations`.
+- `enabled` merges **key-by-key and only turns tools on** — a profile can never
+  disable a tool the recipient enabled themselves.
+- Unknown/hand-injected keys (a `token`, a `caDir`) are ignored.
+- Map Local paths that do not exist on this machine produce a warning.
+- A malformed profile returns `400 {"ok":false,"error":"..."}` and changes nothing.
+
 ### Anything else
 
 `404 {"error":"not found"}`.

@@ -68,6 +68,13 @@ final class ViewSmokeTests: XCTestCase {
     }
 
     @MainActor
+    func testShareViewRenders() {
+        let store = SessionStore()
+        let config = ConfigStore()
+        host(ShareView().environment(config).environment(store))
+    }
+
+    @MainActor
     func testInspectorAndContentViewRender() {
         let engine = EngineController()
         let store = SessionStore()
