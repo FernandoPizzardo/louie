@@ -22,3 +22,8 @@ linux:
   maintainer: Louie
   synopsis: HTTP/HTTPS debugging proxy
   description: Charles-style intercepting proxy with a session inspector and MCP history.
+win:
+  target:
+    - nsis
+    - portable
+  description: Charles-style intercepting proxy with a session inspector and MCP history.

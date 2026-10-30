@@ -1,32 +1,28 @@
-# React + TypeScript + Vite
+# Louie web client
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+React + TypeScript + Vite client of the engine's control API, bundled into the
+Electron desktop shell (`../electron`) for Linux and Windows. On macOS the
+SwiftUI app (`../native`) is the primary UI; this client exists for the
+platforms it cannot run on.
 
-Currently, two official plugins are available:
+The client talks **only** to the token-authenticated loopback control API
+(`GET/POST /api/*`, `GET /events` SSE) and never imports engine code. See
+`../docs/control-api.md` for the contract.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Develop
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```sh
+npm install
+LOUIE_ENGINE=http://127.0.0.1:8889 npm run dev   # proxies /api and /events to a running engine
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+Start an engine first: `node ../bin/charles-clone.js --proxy 8888`.
+
+## Build & lint
+
+```sh
+npm run build   # tsc -b && vite build -> dist/
+npm run lint    # oxlint
+```
+
+`../electron` runs `npm run build` here and serves `dist/`.

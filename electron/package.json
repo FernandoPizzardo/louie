@@ -1,14 +1,16 @@
 {
   "name": "louie-desktop",
   "productName": "Louie",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "description": "Desktop shell for the Louie engine and web UI (Linux first).",
   "main": "src/main.js",
   "scripts": {
     "build:ui": "npm --prefix ../web run build",
     "start": "npm run build:ui && electron .",
-    "dist": "npm run build:ui && electron-builder --linux"
+    "dist": "npm run dist:linux",
+    "dist:linux": "npm run build:ui && electron-builder --linux",
+    "dist:win": "npm run build:ui && electron-builder --win"
   },
   "license": "MIT",
   "devDependencies": {
