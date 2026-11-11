@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Monitor, Moon, Settings, ShieldCheck, Sparkles, Sun, Trash2, Users } from 'lucide-react'
+import { Monitor, Moon, PauseCircle, Settings, ShieldCheck, Sun, Trash2, Users } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
 import { AboutDialog } from '@/components/about-dialog'
+import { BreakpointDialog } from '@/components/breakpoint-dialog'
 import { Inspector } from '@/components/inspector'
 import { SettingsDialog } from '@/components/settings-dialog'
 import { SetupDialog } from '@/components/setup-dialog'
@@ -17,24 +18,26 @@ import { useEngine, type Conn } from '@/hooks/use-engine'
 import { useTheme } from '@/hooks/use-theme'
 import type { Theme } from '@/lib/theme'
 import { cn } from '@/lib/utils'
-import type { TxSummary } from '@/lib/types'
+import type { BreakpointHit, TxSummary } from '@/lib/types'
 
-// The table renders at most this many rows; the rest stay in memory.
 const ROW_LIMIT = 1000
+
+const HTTP_METHODS = ['', 'GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']
 
 export default function App() {
   const engine = useEngine()
   const { theme, cycle: cycleTheme } = useTheme()
   const [query, setQuery] = useState('')
+  const [methodFilter, setMethodFilter] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
   const [sslOnly, setSslOnly] = useState(false)
   const [errorsOnly, setErrorsOnly] = useState(false)
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [setupOpen, setSetupOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
-  // The AI disclosure greets every launch so nobody mistakes this for a
-  // commercially supported product.
-  const [aboutOpen, setAboutOpen] = useState(true)
+  const [aboutOpen, setAboutOpen] = useState(false)
+  const [editingBreakpoint, setEditingBreakpoint] = useState<BreakpointHit | null>(null)
 
   const all = useMemo(
     () => Array.from(engine.txs.values()).sort((a, b) => b.id - a.id),
@@ -43,13 +46,16 @@ export default function App() {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
+    const statusNum = statusFilter.trim() ? parseInt(statusFilter.trim(), 10) : NaN
     return all.filter((t) => {
       if (q && !`${t.method} ${t.host}${t.path}`.toLowerCase().includes(q)) return false
+      if (methodFilter && t.method !== methodFilter) return false
+      if (!Number.isNaN(statusNum) && t.status !== statusNum) return false
       if (sslOnly && !t.sslProxied) return false
       if (errorsOnly && !(t.status >= 400 || t.error)) return false
       return true
     })
-  }, [all, query, sslOnly, errorsOnly])
+  }, [all, query, methodFilter, statusFilter, sslOnly, errorsOnly])
 
   const rows = filtered.slice(0, ROW_LIMIT)
   const selected: TxSummary | null = useMemo(
@@ -61,16 +67,9 @@ export default function App() {
     <div className="flex h-svh flex-col bg-background text-foreground">
       <header className="flex flex-wrap items-center gap-3 border-b px-4 py-2">
         <h1 className="text-base font-semibold tracking-tight">Louie</h1>
-        <button
-          type="button"
-          onClick={() => setAboutOpen(true)}
-          title="Louie is an AI-generated application. Click for details."
-          className="cursor-pointer"
-        >
-          <Badge variant="outline" className="gap-1 border-amber-500/50 text-amber-700 dark:text-amber-400">
-            <Sparkles className="size-3" /> AI-generated
-          </Badge>
-        </button>
+        <Button variant="ghost" size="sm" onClick={() => setAboutOpen(true)}>
+          About
+        </Button>
         <Separator orientation="vertical" className="h-5" />
 
         <div className="flex items-center gap-2">
@@ -87,25 +86,56 @@ export default function App() {
         </Button>
 
         <Input
-          className="w-64"
-          placeholder="Filter by method, host or path"
+          className="w-48"
+          placeholder="Filter by host or path"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
 
+        <select
+          className="h-9 rounded-md border bg-background px-2 text-sm"
+          value={methodFilter}
+          onChange={(e) => setMethodFilter(e.target.value)}
+          aria-label="Method filter"
+        >
+          <option value="">Any method</option>
+          {HTTP_METHODS.filter((m) => m).map((m) => (
+            <option key={m} value={m}>
+              {m}
+            </option>
+          ))}
+        </select>
+
+        <Input
+          className="w-20"
+          placeholder="Status"
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          aria-label="Status filter"
+        />
+
         <div className="flex items-center gap-2">
           <Switch id="ssl-only" checked={sslOnly} onCheckedChange={setSslOnly} />
-          <Label htmlFor="ssl-only">SSL only</Label>
+          <Label htmlFor="ssl-only">SSL</Label>
         </div>
         <div className="flex items-center gap-2">
           <Switch id="errors-only" checked={errorsOnly} onCheckedChange={setErrorsOnly} />
           <Label htmlFor="errors-only">Errors</Label>
         </div>
 
-        <div className="ml-auto flex items-center gap-2">
-          <Button variant="ghost" size="sm" onClick={() => setAboutOpen(true)}>
-            <Sparkles /> About
+        {engine.pendingBreakpoints.length > 0 && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1 text-amber-600 dark:text-amber-400"
+            onClick={() => setEditingBreakpoint(engine.pendingBreakpoints[0])}
+          >
+            <PauseCircle className="size-4" />
+            {engine.pendingBreakpoints.length} paused
           </Button>
+        )}
+
+        <div className="ml-auto flex items-center gap-2">
           <Button variant="ghost" size="sm" onClick={() => setShareOpen(true)}>
             <Users /> Share
           </Button>
@@ -163,6 +193,22 @@ export default function App() {
       <TokenDialog
         open={engine.conn === 'unauthorized'}
         onSubmit={(token) => engine.reconnect(token)}
+      />
+      <BreakpointDialog
+        hit={editingBreakpoint}
+        onClose={() => setEditingBreakpoint(null)}
+        onContinue={async (id) => {
+          await engine.continueBreakpoint(id)
+          setEditingBreakpoint(null)
+        }}
+        onAbort={async (id) => {
+          await engine.abortBreakpoint(id)
+          setEditingBreakpoint(null)
+        }}
+        onEdit={async (id, req, res) => {
+          await engine.editBreakpoint(id, req, res)
+          setEditingBreakpoint(null)
+        }}
       />
     </div>
   )

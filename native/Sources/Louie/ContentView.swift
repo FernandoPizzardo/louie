@@ -88,6 +88,7 @@ struct ContentView: View {
                 .textFieldStyle(.roundedBorder)
                 .frame(maxWidth: 240)
             Toggle("SSL only", isOn: $store.onlySSL)
+            Toggle("Errors only", isOn: $store.errorsOnly)
             Toggle("Paused only", isOn: $store.showPausedOnly)
                 .disabled(store.pendingBreakpoints.isEmpty)
             if !store.pendingBreakpoints.isEmpty {

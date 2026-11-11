@@ -23,6 +23,7 @@ export interface TxSummary {
   contentType: string
   notes: TxNote[]
   start: number
+  paused?: boolean
 }
 
 export interface TxBody {
@@ -85,9 +86,109 @@ export interface NetInfo {
   proxyHost: string
 }
 
+// ---- breakpoints ----
+
+export interface BreakpointBody {
+  type: 'empty' | 'text' | 'binary'
+  text: string
+  editable?: boolean
+}
+
+export interface BreakpointRequest {
+  method: string
+  url: string
+  headers: Record<string, string>
+  body: BreakpointBody
+}
+
+export interface BreakpointResponse {
+  status: number
+  headers: Record<string, string>
+  body: BreakpointBody
+}
+
+export interface BreakpointHit {
+  id: number
+  transactionId: number
+  phase: 'request' | 'response'
+  deadline: number
+  summary: TxSummary
+  request: BreakpointRequest
+  response: BreakpointResponse
+}
+
+// ---- tool config (editable via Settings) ----
+
+export interface LocationPattern {
+  protocol?: string
+  host?: string
+  port?: number | string
+  path?: string
+  query?: string
+}
+
+export interface BlocklistRule {
+  enabled?: boolean
+  location: LocationPattern
+}
+
+export interface MapRemoteRule {
+  enabled?: boolean
+  from: LocationPattern
+  to: LocationPattern
+}
+
+export interface MapLocalRule {
+  enabled?: boolean
+  location: LocationPattern
+  localPath: string
+  caseSensitive?: boolean
+}
+
+export interface RewriteRule {
+  enabled?: boolean
+  type: 'url' | 'header' | 'body'
+  match: string
+  replace: string
+}
+
+export interface RewriteSet {
+  enabled?: boolean
+  location: LocationPattern
+  rules: RewriteRule[]
+}
+
+export interface ThrottleConfig {
+  latency?: number
+  bandwidthDown?: number
+  bandwidthUp?: number
+  loss?: number
+  hosts?: LocationPattern[]
+}
+
+export interface BreakpointRule {
+  enabled?: boolean
+  scope: 'request' | 'response' | 'both'
+  location: LocationPattern
+}
+
+export interface BreakpointsConfig {
+  enabled?: boolean
+  timeoutMs?: number
+  rules: BreakpointRule[]
+}
+
 export interface EngineConfig {
   enabled: Record<string, boolean>
   lanEnabled: boolean
+  blockAction?: 'drop' | '403'
+  blocklist?: BlocklistRule[]
+  mapRemote?: MapRemoteRule[]
+  mapLocal?: MapLocalRule[]
+  rewrite?: RewriteSet[]
+  throttle?: ThrottleConfig
+  breakpoints?: BreakpointsConfig
+  sslLocations?: LocationPattern[]
   [key: string]: unknown
 }
 
