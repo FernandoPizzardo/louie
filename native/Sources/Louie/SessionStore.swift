@@ -15,6 +15,7 @@ final class SessionStore {
     var filter = ""
     var onlySSL = false
     var showPausedOnly = false
+    var errorsOnly = false
     var selectedID: Int?
 
     private var control: ControlClient?
@@ -27,6 +28,7 @@ final class SessionStore {
         rows.filter { s in
             if onlySSL && s.sslProxied != true { return false }
             if showPausedOnly && s.paused != true { return false }
+            if errorsOnly && !(s.status.map { $0 >= 400 } ?? false) && s.error == nil { return false }
             guard !filter.isEmpty else { return true }
             let hay = "\(s.host ?? "")\(s.path ?? "")\(s.method ?? "")\(s.statusText)".lowercased()
             return hay.contains(filter.lowercased())

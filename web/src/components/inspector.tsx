@@ -105,11 +105,15 @@ export function Inspector({ summary }: Props) {
 }
 
 function MessagePane({ headers, body }: { headers?: Record<string, string>; body?: TxBody }) {
+  const [pretty, setPretty] = useState(true)
   if (!headers || !body) {
     return <p className="p-4 text-sm text-muted-foreground">Loading…</p>
   }
   const contentType = headers['content-type'] ?? headers['Content-Type'] ?? ''
-  const text = body.type === 'text' ? prettyBody(body.text, contentType) : ''
+  const rawText = body.type === 'text' ? body.text : ''
+  const text = pretty ? prettyBody(rawText, contentType) : rawText
+  const looksJson = /json/i.test(contentType) || /^\s*[[{]/.test(rawText)
+
   return (
     <ScrollArea className="h-full">
       <div className="space-y-4 p-4">
@@ -129,7 +133,14 @@ function MessagePane({ headers, body }: { headers?: Record<string, string>; body
           )}
         </section>
         <section>
-          <h3 className="mb-2 text-xs font-semibold uppercase text-muted-foreground">Body</h3>
+          <div className="mb-2 flex items-center justify-between">
+            <h3 className="text-xs font-semibold uppercase text-muted-foreground">Body</h3>
+            {looksJson && (
+              <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setPretty((p) => !p)}>
+                {pretty ? 'Raw' : 'Pretty'}
+              </Button>
+            )}
+          </div>
           {body.type === 'empty' && <p className="text-sm text-muted-foreground">Empty</p>}
           {body.type === 'binary' && <p className="text-sm text-muted-foreground">{body.text}</p>}
           {body.type === 'text' && (
@@ -137,7 +148,9 @@ function MessagePane({ headers, body }: { headers?: Record<string, string>; body
               {body.truncated && (
                 <p className="mb-2 text-xs text-amber-600">Truncated at the display cap.</p>
               )}
-              <pre className="whitespace-pre-wrap break-all rounded-md bg-muted p-3 font-mono text-xs">{text}</pre>
+              <pre className="whitespace-pre-wrap break-all rounded-md bg-muted p-3 font-mono text-xs">
+                {text}
+              </pre>
             </>
           )}
         </section>

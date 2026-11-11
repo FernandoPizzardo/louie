@@ -169,17 +169,7 @@ must resolve to `127.0.0.1`. Without an `/etc/hosts` entry the proxy returns
 
 These do not break the current tests, but diverge from the real app:
 
-- Block List: clone always returns 403; Charles defaults to dropping the connection
-  and offers 403 as an option.
-- Map Local: clone returns 404 when the file is missing; Charles falls through to
-  upstream. Charles also supports directory mapping and case-sensitive matching.
-- Map Remote: clone rewrites host/port only; Charles also rewrites protocol, path,
-  and query, and updates the `Host` header.
-- Rewrite: clone assumes UTF-8; Charles uses the response charset.
-- Throttle: clone adds a fixed latency; Charles paces by bytes/sec and can drop
-  packets.
-- Location matching: clone uses host globs; Charles matches a full regex against
-  `scheme://host:port/path?query`, so scheme/port are significant.
+- Throttle: does not implement packet-loss simulation.
 
 ## Implementation status
 
@@ -195,7 +185,8 @@ All of the above are implemented in `lib/tools.js`, with e2e coverage in
 - Map Remote rewrites protocol/host/port/path/query and the `Host` header.
 - Rewrite decodes/re-encodes bodies with the response charset and skips
   non-textual content types.
-- Throttle adds a fixed `latency` and paces by `bandwidthDown` (KB/s).
+- Throttle adds a fixed `latency`, paces by `bandwidthDown` (KB/s) on the
+  response, and paces by `bandwidthUp` (KB/s) on the request.
 - Pipeline order is Breakpoints (5, request) -> Map Remote (10) -> Rewrite (12)
   -> Block List (50) -> Map Local (72) -> No Cache -> Throttle, then Rewrite /
   No Cache / Throttle / Breakpoints on the response.
@@ -212,10 +203,7 @@ All of the above are implemented in `lib/tools.js`, with e2e coverage in
 
 Known remaining gaps:
 
-- Filters after Map Remote match the original location, whereas Charles mutates
-  the event so later filters see the mapped location.
 - Throttle does not implement packet-loss simulation.
-- `bandwidthUp` (request pacing) is not applied.
 
 The UI is the native macOS app (Louie, `native/`); the static web GUI was
 retired and the server is now API-only. `blockAction` and the Map Remote

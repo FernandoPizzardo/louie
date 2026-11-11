@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import { api, eventsUrl, setToken } from '@/lib/engine'
-import type { Status, TxSummary } from '@/lib/types'
+import type { BreakpointHit, Status, TxSummary } from '@/lib/types'
 
 export type Conn = 'connecting' | 'live' | 'offline' | 'unauthorized'
 
@@ -8,6 +8,7 @@ interface State {
   txs: Map<number, TxSummary>
   recording: boolean
   conn: Conn
+  pendingBreakpoints: BreakpointHit[]
 }
 
 type Action =
@@ -15,6 +16,7 @@ type Action =
   | { type: 'clear' }
   | { type: 'recording'; on: boolean }
   | { type: 'conn'; conn: Conn }
+  | { type: 'breakpoint'; hit: BreakpointHit; pending: boolean }
 
 function reducer(s: State, a: Action): State {
   switch (a.type) {
@@ -24,11 +26,23 @@ function reducer(s: State, a: Action): State {
       return { ...s, txs }
     }
     case 'clear':
-      return { ...s, txs: new Map() }
+      return { ...s, txs: new Map(), pendingBreakpoints: [] }
     case 'recording':
       return { ...s, recording: a.on }
     case 'conn':
       return { ...s, conn: a.conn }
+    case 'breakpoint': {
+      const list = [...s.pendingBreakpoints]
+      if (a.pending) {
+        const idx = list.findIndex((h) => h.id === a.hit.id)
+        if (idx >= 0) list[idx] = a.hit
+        else list.push(a.hit)
+      } else {
+        const idx = list.findIndex((h) => h.id === a.hit.id)
+        if (idx >= 0) list.splice(idx, 1)
+      }
+      return { ...s, pendingBreakpoints: list }
+    }
   }
 }
 
@@ -41,6 +55,7 @@ export function useEngine() {
     txs: new Map(),
     recording: true,
     conn: 'connecting',
+    pendingBreakpoints: [],
   } satisfies State)
   const [status, setStatus] = useState<Status | null>(null)
   const [generation, setGeneration] = useState(0)
@@ -52,11 +67,19 @@ export function useEngine() {
     let cancelled = false
     dispatch({ type: 'conn', conn: 'connecting' })
 
-    Promise.all([api<TxSummary[]>('/api/transactions'), api<Status>('/api/status')])
-      .then(([list, st]) => {
+    Promise.all([
+      api<TxSummary[]>('/api/transactions'),
+      api<Status>('/api/status'),
+      api<BreakpointHit[]>('/api/breakpoints/pending'),
+    ])
+      .then(([list, st, bpList]) => {
         if (cancelled) return
         dispatch({ type: 'upsert', txs: list })
         dispatch({ type: 'recording', on: st.recording })
+        dispatch({ type: 'clear' })
+        dispatch({ type: 'upsert', txs: list })
+        dispatch({ type: 'recording', on: st.recording })
+        for (const h of bpList) dispatch({ type: 'breakpoint', hit: h, pending: true })
         setStatus(st)
       })
       .catch((e: { status?: number }) => {
@@ -80,6 +103,10 @@ export function useEngine() {
     })
     es.addEventListener('recording', (e) => {
       dispatch({ type: 'recording', on: (JSON.parse((e as MessageEvent).data) as { on: boolean }).on })
+    })
+    es.addEventListener('breakpoint', (e) => {
+      const data = JSON.parse((e as MessageEvent).data) as BreakpointHit & { pending?: boolean }
+      dispatch({ type: 'breakpoint', hit: data, pending: data.pending !== false })
     })
 
     return () => {
@@ -114,5 +141,32 @@ export function useEngine() {
     setGeneration((g) => g + 1)
   }, [])
 
-  return { ...state, status, setRecording, clear, reconnect }
+  const continueBreakpoint = useCallback(async (id: number) => {
+    await api(`/api/breakpoint/${id}/continue`, { method: 'POST' })
+  }, [])
+
+  const abortBreakpoint = useCallback(async (id: number) => {
+    await api(`/api/breakpoint/${id}/abort`, { method: 'POST' })
+  }, [])
+
+  const editBreakpoint = useCallback(
+    async (id: number, request?: unknown, response?: unknown) => {
+      await api(`/api/breakpoint/${id}/edit`, {
+        method: 'POST',
+        body: { request, response },
+      })
+    },
+    []
+  )
+
+  return {
+    ...state,
+    status,
+    setRecording,
+    clear,
+    reconnect,
+    continueBreakpoint,
+    abortBreakpoint,
+    editBreakpoint,
+  }
 }

@@ -350,6 +350,23 @@ async function main() {
     origin2.srv.close();
   });
 
+  // 7c. Later filters match the mapped location, not the original request.
+  await test('Map Remote updates the location for later filters', async () => {
+    const origin2 = await startHttpOrigin('B');
+    config.enabled.mapRemote = true;
+    config.enabled.blocklist = true;
+    config.blockAction = '403';
+    config.mapRemote = [{ from: { host: '127.0.0.1', port: origin.port, path: '/mapped' },
+      to: { host: '127.0.0.1', port: origin2.port, protocol: 'http' } }];
+    config.blocklist = [{ host: '127.0.0.1', port: origin2.port, path: '/mapped' }];
+    const r = await curlProxy(proxyPort, `http://127.0.0.1:${origin.port}/mapped`);
+    assert.ok(r.ok, 'blockAction=403 should return a response: ' + r.body);
+    assert.match(r.body, /403 Forbidden/, 'Block List should match the mapped destination: ' + r.body);
+    config.enabled.mapRemote = false; config.enabled.blocklist = false;
+    config.mapRemote = []; config.blocklist = []; config.blockAction = 'drop';
+    origin2.srv.close();
+  });
+
   // 8. Throttle tool (latency)
   await test('Throttle tool adds latency', async () => {
     config.enabled.throttle = true;
@@ -383,7 +400,22 @@ async function main() {
     srv.close();
   });
 
-  // 8c. Pipeline ordering: Block List (order 50) must run before Map Local (72).
+  // 8c. Throttle tool (upload pacing, like Charles)
+  await test('Throttle paces request bandwidth', async () => {
+    const big = 'x'.repeat(20 * 1024); // 20 KB
+    config.enabled.throttle = true;
+    config.throttle = { latency: 0, bandwidthUp: 40, hosts: [] }; // 40 KB/s -> 20KB ~= 500ms
+    const t0 = Date.now();
+    const r = await curlProxy(proxyPort, `http://127.0.0.1:${origin.port}/upload`, {
+      extra: ['--data-binary', big],
+    });
+    const dt = Date.now() - t0;
+    assert.ok(r.ok, 'curl failed: ' + r.body);
+    assert.ok(dt >= 400, `expected >=400ms upload pacing, got ${dt}ms`);
+    config.enabled.throttle = false; config.throttle = { latency: 0, hosts: [] };
+  });
+
+  // 8d. Pipeline ordering: Block List (order 50) must run before Map Local (72).
   await test('pipeline ordering: Block List wins over Map Local', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'order-'));
     const file = path.join(dir, 'x.txt');

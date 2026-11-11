@@ -48,7 +48,13 @@ export function TransactionsTable({ rows, selectedId, onSelect }: Props) {
                 <Badge variant="outline" className="font-mono">{t.method}</Badge>
               </TableCell>
               <TableCell className={cn('font-mono text-xs font-medium', statusClass(t.status, t.error))}>
-                {t.error ? 'ERR' : t.status || '…'}
+                {t.paused ? (
+                  <span className="text-amber-600">⏸</span>
+                ) : t.error ? (
+                  'ERR'
+                ) : (
+                  t.status || '…'
+                )}
               </TableCell>
               <TableCell className="max-w-48 truncate" title={t.host}>
                 {t.host}
