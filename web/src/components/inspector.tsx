@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState, type ReactNode } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -149,7 +149,7 @@ function MessagePane({ headers, body }: { headers?: Record<string, string>; body
                 <p className="mb-2 text-xs text-amber-600">Truncated at the display cap.</p>
               )}
               <pre className="whitespace-pre-wrap break-all rounded-md bg-muted p-3 font-mono text-xs">
-                {text}
+                {looksJson ? colorJson(text) : text}
               </pre>
             </>
           )}
@@ -157,6 +157,36 @@ function MessagePane({ headers, body }: { headers?: Record<string, string>; body
       </div>
     </ScrollArea>
   )
+}
+
+const JSON_TOKEN = /("(?:\\.|[^"\\])*")(\s*:)?|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|\btrue\b|\bfalse\b|\bnull\b/g
+
+/** Tokenize JSON without interpreting response text as markup. */
+function colorJson(text: string): ReactNode[] {
+  const parts: ReactNode[] = []
+  let lastIndex = 0
+  let key = 0
+  for (const match of text.matchAll(JSON_TOKEN)) {
+    const index = match.index
+    parts.push(text.slice(lastIndex, index))
+    let className = 'text-muted-foreground'
+    if (match[1]) {
+      className = match[2]
+        ? 'text-sky-700 dark:text-sky-300'
+        : 'text-emerald-700 dark:text-emerald-300'
+    } else if (match[0] !== 'true' && match[0] !== 'false' && match[0] !== 'null') {
+      className = 'text-violet-700 dark:text-violet-300'
+    }
+    parts.push(
+      <Fragment key={key++}>
+        <span className={className}>{match[1] ?? match[0]}</span>
+        {match[2]}
+      </Fragment>,
+    )
+    lastIndex = index + match[0].length
+  }
+  parts.push(text.slice(lastIndex))
+  return parts
 }
 
 function PinButton({ id }: { id: number }) {

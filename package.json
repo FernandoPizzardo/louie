@@ -1,7 +1,7 @@
 {
   "name": "charles-clone",
-  "version": "1.0.0",
-  "description": "A small HTTP/HTTPS intercepting proxy debugger in the spirit of Charles Proxy \u2014 MITM SSL proxying, live session table, and the classic tools (block list, map remote/local, rewrite, throttle).",
+  "version": "1.0.1",
+  "description": "A small HTTP/HTTPS intercepting proxy debugger in the spirit of Charles Proxy — MITM SSL proxying, live session table, and the classic tools (block list, map remote/local, rewrite, throttle).",
   "bin": {
     "charles-clone": "bin/charles-clone.js"
   },

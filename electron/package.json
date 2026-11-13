@@ -1,7 +1,7 @@
 {
   "name": "louie-desktop",
   "productName": "Louie",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "author": "Fernando Pizzardo",
   "description": "Louie - Charles-style HTTP/HTTPS intercepting proxy. AI-generated app; desktop shell for Linux and Windows.",
